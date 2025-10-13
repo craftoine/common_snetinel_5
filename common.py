@@ -23,7 +23,7 @@ from scipy.ndimage import sobel
 #!pip install lpips
 import lpips
 from sklearn.decomposition import PCA
-
+from warnings import warn
 
 
 
@@ -486,19 +486,23 @@ class weight_nn_compression(nn.Module):
 
 class Custom_point_wise_conv(nn.Module):
     #redefined conv but with custom parameters
-    def __init__(self, in_channels, out_channels, bias=False):
+    def __init__(self, in_channels, out_channels, bias=False, compression="no"):
         super(Custom_point_wise_conv, self).__init__()
         # Custom weights for pointwise convolution
-        compression = "no"#"no","svd","nn"
+        #compression = "svd"#"no","svd","nn"
         self.compression_model = None
         if compression == "no":
             self.compression_model = weight_no_compression(in_channels, out_channels)
-        elif compression == "svd":
-            self.compression_model = weight_svd_compression(in_channels, out_channels, rank=20)#20)
+        elif len(compression)>=3 and compression[:3] == "svd":
+            try:
+                rank = int(compression[3:])
+            except:
+                rank = 20
+                warn("No rank specified for svd compression, using default rank=20")
+            self.compression_model = weight_svd_compression(in_channels, out_channels, rank=rank)
         elif compression == "nn":
             self.compression_model = weight_nn_compression(in_channels, out_channels)
             #raise a warning as summary doesn't work well with this model
-            from warnings import warn
             warn("Custom_point_wise_conv with nn compression not work well with torchsummary weight counting")
         else:
             raise ValueError("Unknown compression type")
@@ -512,7 +516,7 @@ class Custom_point_wise_conv(nn.Module):
 
 
 class DSC(nn.Module):
-    def __init__(self, in_channels, out_channels, num_spectral_bands, depth_multiplier=1, upsample_scale=2, mode='bilinear',correct_relu = True,same_kernel = False,bias=False):
+    def __init__(self, in_channels, out_channels, num_spectral_bands, depth_multiplier=1, upsample_scale=2, mode='bilinear',correct_relu = True,same_kernel = False,bias=False,compression="no"):
         super(DSC, self).__init__()
         self.same_kernel = same_kernel
         if self.same_kernel:
@@ -538,7 +542,8 @@ class DSC(nn.Module):
                                         bias=bias)"""
         self.pointwise_conv = Custom_point_wise_conv(in_channels=num_spectral_bands * depth_multiplier,
                                                     out_channels=out_channels,
-                                                    bias=bias)
+                                                    bias=bias,
+                                                    compression=compression)
         
         self.bn = nn.BatchNorm2d(out_channels)
         self.correct_relu = correct_relu
@@ -563,10 +568,10 @@ class DSC(nn.Module):
 
 
 class S5_DSCR_S(nn.Module):
-    def __init__(self, in_channels, out_channels, num_spectral_bands, depth_multiplier=1, upsample_scale=2, mode='bilinear',correct_relu = True,same_kernel = False,bias=False):
+    def __init__(self, in_channels, out_channels, num_spectral_bands, depth_multiplier=1, upsample_scale=2, mode='bilinear',correct_relu = True,same_kernel = False,bias=False,compression="no"):
         super(S5_DSCR_S, self).__init__()
         self.interpolation = nn.Upsample(scale_factor=upsample_scale, mode='bicubic', align_corners=False)
-        self.dsc_block = DSC(in_channels, out_channels, num_spectral_bands, depth_multiplier, correct_relu=correct_relu, same_kernel=same_kernel, bias=bias)
+        self.dsc_block = DSC(in_channels, out_channels, num_spectral_bands, depth_multiplier, correct_relu=correct_relu, same_kernel=same_kernel, bias=bias, compression=compression)
         self.relu = nn.ReLU()
     def forward(self, x, target_size=None,mean=torch.tensor(0.0), std=torch.tensor(1.0)):
         mean, std = mean.to(x.device), std.to(x.device)
@@ -594,16 +599,16 @@ class ReshapeLayer(nn.Module):
     def forward(self, x):
         return x.view(-1,self.target, x.size(2), x.size(3))
 class ImprovedDSC_2(nn.Module):
-    def __init__(self, in_channels, out_channels, num_spectral_bands, depth_multiplier=1, num_layers=3, kernel_size=3, correct_relu = True, same_kernel = False,bias=False):
+    def __init__(self, in_channels, out_channels, num_spectral_bands, depth_multiplier=1, num_layers=3, kernel_size=3, correct_relu = True, same_kernel = False,bias=False,compression="no"):
         super(ImprovedDSC_2, self).__init__()
         
         layers = []
         for ly in range(num_layers):
             if same_kernel:
                 depthwise_conv = nn.Conv2d(
-                    in_channels=1,  
-                    out_channels= depth_multiplier,  
-                    kernel_size=kernel_size,  
+                    in_channels=1,
+                    out_channels=depth_multiplier,
+                    kernel_size=kernel_size,
                     stride=1,
                     padding=kernel_size // 2, 
                     groups=1,
@@ -634,7 +639,8 @@ class ImprovedDSC_2(nn.Module):
             pointwise_conv = Custom_point_wise_conv(
                 in_channels=num_spectral_bands * depth_multiplier,
                 out_channels=out_channels,
-                bias=bias
+                bias=bias,
+                compression=compression
             )
             layers.append(pointwise_conv)
             layers.append(nn.BatchNorm2d(out_channels))
@@ -651,7 +657,7 @@ class S5_DSCR(nn.Module):
     def __init__(self, in_channels, out_channels, num_spectral_bands, depth_multiplier=1, num_layers=3, kernel_size=3, upsample_scale=2, correct_relu = True, same_kernel = False,bias=False):
         super(S5_DSCR, self).__init__()
         self.interpolation = nn.Upsample(scale_factor=upsample_scale, mode='bicubic', align_corners=False)
-        self.dsc_block = ImprovedDSC_2(in_channels, out_channels, num_spectral_bands, depth_multiplier, num_layers, kernel_size,correct_relu=correct_relu,same_kernel=same_kernel,bias=bias)
+        self.dsc_block = ImprovedDSC_2(in_channels, out_channels, num_spectral_bands, depth_multiplier, num_layers, kernel_size,correct_relu=correct_relu,same_kernel=same_kernel,bias=bias,compression="no")
 
     def forward(self, x, mean=torch.tensor(0), std=torch.tensor(1)):
         mean,std = mean.to(x.device), std.to(x.device)
@@ -710,7 +716,7 @@ def plot_hyperspectral_images_false_color_global2(lr_img, hr_img, pred_img, idx,
     plt.show()
     plt.close(fig)
 
-def metric_s5net(model, test_loader, device, network_name,loss_fn_lpips_gpu,save_dir, csv_filename= None):
+def metric_s5net(model, test_loader, device, network_name,loss_fn_lpips_gpu,save_dir, csv_filename= None, plot_hyper = True):
     if csv_filename is None:
         assert False, "Please provide a csv filename to save the results"
     model.eval()
@@ -781,8 +787,8 @@ def metric_s5net(model, test_loader, device, network_name,loss_fn_lpips_gpu,save
                 lr_pca = (lr_pca - lr_pca.mean()) / lr_pca.std()
                 hr_pca = (hr_pca - hr_pca.mean()) / hr_pca.std()
                 sr_pca = (sr_pca - sr_pca.mean()) / sr_pca.std()
-
-                plot_hyperspectral_images_false_color_global2(lr_pca, hr_pca, sr_pca, ii, network_name, save_dir, bands=[1,0, 2], cmap='viridis')
+                if plot_hyper:
+                    plot_hyperspectral_images_false_color_global2(lr_pca, hr_pca, sr_pca, ii, network_name, save_dir, bands=[1,0, 2], cmap='viridis')
 
     avg_psnr = np.mean(psnr_values)
     avg_scc = np.mean(scc_values)
@@ -822,7 +828,7 @@ class CustomLoader:
         self.std = torch.tensor(std,dtype=torch.float32).view(1, -1, 1, 1)
 
 
-def S5_DSCR_S_train(args,train_loader,valid_loader,num_bands,device,correct_relu = True,same_kernel = False, bias = False):
+def S5_DSCR_S_train(args,train_loader,valid_loader,num_bands,device,correct_relu = True,same_kernel = False, bias = False,compression="no"):
     model = S5_DSCR_S(in_channels=num_bands, 
                             out_channels=497, 
                             num_spectral_bands=num_bands, 
@@ -831,9 +837,10 @@ def S5_DSCR_S_train(args,train_loader,valid_loader,num_bands,device,correct_relu
                             mode='convtranspose',
                             correct_relu=correct_relu,
                             same_kernel=same_kernel,
-                            bias=bias).to(device)  
-    
-    model = model.to(device)     
+                            bias=bias,
+                            compression=compression).to(device)
+
+    model = model.to(device)
     summary(model, input_size=(num_bands, 64, 64))
 
     log_dir = os.path.join(args.save_dir, args.save_prefix, 'DSC')
@@ -915,7 +922,7 @@ def S5_DSCR_S_train(args,train_loader,valid_loader,num_bands,device,correct_relu
 
 
 
-def S5_DSCR_train(args,train_loader,valid_loader,num_bands,device,correct_relu = True, same_kernel = False, bias = False):
+def S5_DSCR_train(args,train_loader,valid_loader,num_bands,device,correct_relu = True, same_kernel = False, bias = False,compression="no"):
     model = S5_DSCR(
         in_channels=497,
         out_channels=497,
@@ -926,7 +933,8 @@ def S5_DSCR_train(args,train_loader,valid_loader,num_bands,device,correct_relu =
         upsample_scale=4,
         correct_relu=correct_relu,
         same_kernel=same_kernel,
-        bias=bias).to(device) 
+        bias=bias,
+        compression=compression).to(device)
 
     model = model.to(device) 
     summary(model, input_size=(num_bands, 64, 64))
@@ -1010,7 +1018,7 @@ def S5_DSCR_train(args,train_loader,valid_loader,num_bands,device,correct_relu =
 
 
 
-def S5_DSCR_S_test(params,test_loader,device,num_bands,loss_fn_lpips_gpu,csv_file, correct_relu = True, same_kernel = False,bias=False):
+def S5_DSCR_S_test(params,test_loader,device,num_bands,loss_fn_lpips_gpu,csv_file, correct_relu = True, same_kernel = False,bias=False,plot_hyper = True,compression="no"):
     model = S5_DSCR_S(in_channels=num_bands, 
                             out_channels=497, 
                             num_spectral_bands=num_bands, 
@@ -1019,15 +1027,16 @@ def S5_DSCR_S_test(params,test_loader,device,num_bands,loss_fn_lpips_gpu,csv_fil
                             mode='convtranspose',
                             correct_relu=correct_relu,
                             same_kernel=same_kernel,
-                            bias=bias).to(device)  
-    
+                            bias=bias,
+                            compression=compression).to(device)
+
     model.load_state_dict(torch.load(os.path.join(params.save_dir, f"{params.save_prefix}_DSC2_updated_hyperspectral_model.pth")))
 
-    avg_psnr, avg_scc, avg_ssim, avg_lpips, lr_images, hr_images, sr_images = metric_s5net(model, test_loader, device, 'S5_DSCR_S',loss_fn_lpips_gpu,params.save_dir,csv_file)
+    avg_psnr, avg_scc, avg_ssim, avg_lpips, lr_images, hr_images, sr_images = metric_s5net(model, test_loader, device, 'S5_DSCR_S',loss_fn_lpips_gpu,params.save_dir,csv_file, plot_hyper=plot_hyper)
     return lr_images, hr_images, sr_images
 
 
-def S5_DSCR_S_test_on_train_set(params,train_loader,device,num_bands,loss_fn_lpips_gpu,csv_file, correct_relu = True, same_kernel = False,bias=False):
+def S5_DSCR_S_test_on_train_set(params,train_loader,device,num_bands,loss_fn_lpips_gpu,csv_file, correct_relu = True, same_kernel = False,bias=False,plot_hyper = True,compression="no"):
     model = S5_DSCR_S(in_channels=num_bands, 
                             out_channels=497, 
                             num_spectral_bands=num_bands, 
@@ -1036,13 +1045,14 @@ def S5_DSCR_S_test_on_train_set(params,train_loader,device,num_bands,loss_fn_lpi
                             mode='convtranspose',
                             correct_relu=correct_relu,
                             same_kernel=same_kernel,
-                            bias=bias).to(device)  
-    
+                            bias=bias,
+                            compression=compression).to(device)
+
     model.load_state_dict(torch.load(os.path.join(params.save_dir, f"{params.save_prefix}_DSC2_updated_hyperspectral_model.pth")))
 
-    avg_psnr, avg_scc, avg_ssim, avg_lpips, lr_images, hr_images, sr_images = metric_s5net(model, train_loader, device, 'S5_DSCR_S',loss_fn_lpips_gpu,params.save_dir,csv_file)
+    avg_psnr, avg_scc, avg_ssim, avg_lpips, lr_images, hr_images, sr_images = metric_s5net(model, train_loader, device, 'S5_DSCR_S',loss_fn_lpips_gpu,params.save_dir,csv_file, plot_hyper=plot_hyper)
     return lr_images, hr_images, sr_images
-def S5_DSCR_S_test_on_val_set(params,valid_loader,device,num_bands,loss_fn_lpips_gpu,csv_file, correct_relu = True, same_kernel = False,bias=False):
+def S5_DSCR_S_test_on_val_set(params,valid_loader,device,num_bands,loss_fn_lpips_gpu,csv_file, correct_relu = True, same_kernel = False,bias=False,plot_hyper = True,compression="no"):
     model = S5_DSCR_S(in_channels=num_bands, 
                             out_channels=497, 
                             num_spectral_bands=num_bands, 
@@ -1051,13 +1061,14 @@ def S5_DSCR_S_test_on_val_set(params,valid_loader,device,num_bands,loss_fn_lpips
                             mode='convtranspose',
                             correct_relu=correct_relu,
                             same_kernel=same_kernel,
-                            bias=bias).to(device)  
-    
+                            bias=bias,
+                            compression=compression).to(device)
+
     model.load_state_dict(torch.load(os.path.join(params.save_dir, f"{params.save_prefix}_DSC2_updated_hyperspectral_model.pth")))
 
-    avg_psnr, avg_scc, avg_ssim, avg_lpips, lr_images, hr_images, sr_images = metric_s5net(model, valid_loader, device, 'S5_DSCR_S',loss_fn_lpips_gpu,params.save_dir,csv_file)
+    avg_psnr, avg_scc, avg_ssim, avg_lpips, lr_images, hr_images, sr_images = metric_s5net(model, valid_loader, device, 'S5_DSCR_S',loss_fn_lpips_gpu,params.save_dir,csv_file, plot_hyper=plot_hyper)
     return lr_images, hr_images, sr_images
-def S5_DSCR_test(params,test_loader,device,num_bands,loss_fn_lpips_gpu,csv_file, correct_relu = True, same_kernel = False,bias=False):
+def S5_DSCR_test(params,test_loader,device,num_bands,loss_fn_lpips_gpu,csv_file, correct_relu = True, same_kernel = False,bias=False,plot_hyper = True,compression="no"):
     model = S5_DSCR(
         in_channels=497,
         out_channels=497,
@@ -1068,12 +1079,13 @@ def S5_DSCR_test(params,test_loader,device,num_bands,loss_fn_lpips_gpu,csv_file,
         upsample_scale=4,
         correct_relu=correct_relu,
         same_kernel=same_kernel,
-        bias=bias)
+        bias=bias,
+        compression=compression)
 
     model.load_state_dict(torch.load(os.path.join(params.save_dir, f"{params.save_prefix}_DSC_residual2_updated_hyperspectral_model.pth")))
-    avg_psnr, avg_scc, avg_ssim, avg_lpips, lr_images, hr_images, sr_images = metric_s5net(model, test_loader, device,'S5_DSCR',loss_fn_lpips_gpu,params.save_dir,csv_file)
+    avg_psnr, avg_scc, avg_ssim, avg_lpips, lr_images, hr_images, sr_images = metric_s5net(model, test_loader, device,'S5_DSCR',loss_fn_lpips_gpu,params.save_dir,csv_file, plot_hyper=plot_hyper)
     return lr_images, hr_images, sr_images
-def S5_DSCR_test_on_train_set(params,train_loader,device,num_bands,loss_fn_lpips_gpu,csv_file, correct_relu = True, same_kernel = False,bias=False):
+def S5_DSCR_test_on_train_set(params,train_loader,device,num_bands,loss_fn_lpips_gpu,csv_file, correct_relu = True, same_kernel = False,bias=False,plot_hyper = True,compression="no"):
     model = S5_DSCR(
         in_channels=497,
         out_channels=497,
@@ -1084,28 +1096,32 @@ def S5_DSCR_test_on_train_set(params,train_loader,device,num_bands,loss_fn_lpips
         upsample_scale=4,
         correct_relu=correct_relu,
         same_kernel=same_kernel,
-        bias=bias)
+        bias=bias,
+        compression=compression)
 
     model.load_state_dict(torch.load(os.path.join(params.save_dir, f"{params.save_prefix}_DSC_residual2_updated_hyperspectral_model.pth")))
-    avg_psnr, avg_scc, avg_ssim, avg_lpips, lr_images, hr_images, sr_images = metric_s5net(model, train_loader, device,'S5_DSCR_on_train_set',loss_fn_lpips_gpu,params.save_dir,csv_file)
+    avg_psnr, avg_scc, avg_ssim, avg_lpips, lr_images, hr_images, sr_images = metric_s5net(model, train_loader, device,'S5_DSCR_on_train_set',loss_fn_lpips_gpu,params.save_dir,csv_file, plot_hyper=plot_hyper)
     return lr_images, hr_images, sr_images
-def S5_DSCR_S_test_on_val_set(params,valid_loader,device,num_bands,loss_fn_lpips_gpu,csv_file, correct_relu = True, same_kernel = False,bias=False):
-    model = S5_DSCR_S(in_channels=num_bands, 
-                            out_channels=497, 
-                            num_spectral_bands=num_bands, 
-                            depth_multiplier=1, 
-                            upsample_scale=4, 
-                            mode='convtranspose',
-                            correct_relu=correct_relu,
-                            same_kernel=same_kernel,
-                            bias=bias).to(device)  
+def S5_DSCR_test_on_val_set(params,valid_loader,device,num_bands,loss_fn_lpips_gpu,csv_file, correct_relu = True, same_kernel = False,bias=False,plot_hyper = True,compression="no"):
+    model = S5_DSCR(
+        in_channels=497,
+        out_channels=497,
+        num_spectral_bands=497,
+        depth_multiplier=3,
+        num_layers=5,
+        kernel_size=5,
+        upsample_scale=4,
+        correct_relu=correct_relu,
+        same_kernel=same_kernel,
+        bias=bias,
+        compression=compression)
     
     model.load_state_dict(torch.load(os.path.join(params.save_dir, f"{params.save_prefix}_DSC2_updated_hyperspectral_model.pth")))
 
-    avg_psnr, avg_scc, avg_ssim, avg_lpips, lr_images, hr_images, sr_images = metric_s5net(model, valid_loader, device, 'S5_DSCR_S_on_val_set',loss_fn_lpips_gpu,params.save_dir,csv_file)
+    avg_psnr, avg_scc, avg_ssim, avg_lpips, lr_images, hr_images, sr_images = metric_s5net(model, valid_loader, device, 'S5_DSCR_on_val_set',loss_fn_lpips_gpu,params.save_dir,csv_file, plot_hyper=plot_hyper)
     return lr_images, hr_images, sr_images
 
-def bicubic_upsample_test(params,test_loader,device,loss_fn_lpips_gpu,csv_file):
+def bicubic_upsample_test(params,test_loader,device,loss_fn_lpips_gpu,csv_file,plot_hyper = True):
     class BicubicUpsample(nn.Module):
         def __init__(self, scale_factor=4):
             super(BicubicUpsample, self).__init__()
@@ -1120,9 +1136,9 @@ def bicubic_upsample_test(params,test_loader,device,loss_fn_lpips_gpu,csv_file):
             return x
 
     model = BicubicUpsample(scale_factor=4).to(device)
-    avg_psnr, avg_scc, avg_ssim, avg_lpips, lr_images, hr_images, sr_images = metric_s5net(model, test_loader, device, 'Bicubic_Upsample',loss_fn_lpips_gpu,params.save_dir,csv_file)
+    avg_psnr, avg_scc, avg_ssim, avg_lpips, lr_images, hr_images, sr_images = metric_s5net(model, test_loader, device, 'Bicubic_Upsample',loss_fn_lpips_gpu,params.save_dir,csv_file, plot_hyper=plot_hyper)
     return lr_images, hr_images, sr_images
-def bicubic_upsample_test_on_train_set(params,train_loader,device,loss_fn_lpips_gpu,csv_file):
+def bicubic_upsample_test_on_train_set(params,train_loader,device,loss_fn_lpips_gpu,csv_file,plot_hyper = True):
     class BicubicUpsample(nn.Module):
         def __init__(self, scale_factor=4):
             super(BicubicUpsample, self).__init__()
@@ -1137,9 +1153,9 @@ def bicubic_upsample_test_on_train_set(params,train_loader,device,loss_fn_lpips_
             return x
 
     model = BicubicUpsample(scale_factor=4).to(device)
-    avg_psnr, avg_scc, avg_ssim, avg_lpips, lr_images, hr_images, sr_images = metric_s5net(model, train_loader, device, 'Bicubic_Upsample_on_train_set',loss_fn_lpips_gpu,params.save_dir,csv_file)
+    avg_psnr, avg_scc, avg_ssim, avg_lpips, lr_images, hr_images, sr_images = metric_s5net(model, train_loader, device, 'Bicubic_Upsample_on_train_set',loss_fn_lpips_gpu,params.save_dir,csv_file, plot_hyper=plot_hyper)
     return lr_images, hr_images, sr_images
-def bicubic_upsample_test_on_val_set(params,valid_loader,device,loss_fn_lpips_gpu,csv_file):
+def bicubic_upsample_test_on_val_set(params,valid_loader,device,loss_fn_lpips_gpu,csv_file,plot_hyper = True):
     class BicubicUpsample(nn.Module):
         def __init__(self, scale_factor=4):
             super(BicubicUpsample, self).__init__()
@@ -1154,5 +1170,5 @@ def bicubic_upsample_test_on_val_set(params,valid_loader,device,loss_fn_lpips_gp
             return x
 
     model = BicubicUpsample(scale_factor=4).to(device)
-    avg_psnr, avg_scc, avg_ssim, avg_lpips, lr_images, hr_images, sr_images = metric_s5net(model, valid_loader, device, 'Bicubic_Upsample_on_val_set',loss_fn_lpips_gpu,params.save_dir,csv_file)
+    avg_psnr, avg_scc, avg_ssim, avg_lpips, lr_images, hr_images, sr_images = metric_s5net(model, valid_loader, device, 'Bicubic_Upsample_on_val_set',loss_fn_lpips_gpu,params.save_dir,csv_file, plot_hyper=plot_hyper)
     return lr_images, hr_images, sr_images
