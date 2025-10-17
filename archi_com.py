@@ -44,8 +44,18 @@ class weight_no_compression(nn.Module):
     def __init__(self, in_channels, out_channels):
         super(weight_no_compression, self).__init__()
         # Custom weights for pointwise convolution
-        self.weight = nn.Parameter(torch.randn(in_channels, out_channels) * 0.01)
-
+        #self.weight = nn.Parameter(torch.randn(in_channels, out_channels) * 0.01)
+        conv_1x1 = nn.Conv2d(in_channels=in_channels,
+                             out_channels=out_channels,
+                             kernel_size=1,
+                             bias=False)
+        conv_1x1.reset_parameters()
+        self.weight = conv_1x1.weight
+        #self.weight shape is (out_channels, in_channels, 1, 1)
+        #reshape it to (in_channels, out_channels)
+        self.weight = nn.Parameter(self.weight.view(out_channels, in_channels).t())
+        #print("Weight matrix shape:", self.weight.shape)
+        #self.plot_weight()
     def forward(self,x,bias):
         weight= self.weight
         x = apply_mult(x,weight,bias)
@@ -97,11 +107,45 @@ class weight_svd_compression(nn.Module):
         #self.U = nn.Parameter(torch.randn(in_channels, rank) * 0.01)
         #self.S = nn.Parameter(torch.randn(rank, out_channels) * 0.01)
         #for torchsummary name of parameters need to be "weight"
-        self.weight = nn.Parameter(torch.randn(in_channels*rank+out_channels*rank) * 0.01)
+        conv_1x1 = nn.Conv2d(in_channels=in_channels,
+                                out_channels=out_channels,
+                                kernel_size=1,
+                                bias=False)
+        conv_1x1.reset_parameters()
+        #get svd of conv_1x1 weight
+        weight_init = conv_1x1.weight
+        #self.weight shape is (out_channels, in_channels, 1, 1)
+        #reshape it to (in_channels, out_channels)
+        weight_init = weight_init.view(out_channels, in_channels).t()
+        weight_init = weight_init.detach().cpu().numpy()
+        U_init, S_init, Vt_init = np.linalg.svd(weight_init, full_matrices=False)
+        U_init = U_init[:, :rank]
+        S_init = S_init[:rank]
+        Vt_init = Vt_init[:rank, :]
+        #renormalise U and Vt using sqrt(S)
+        #shape of U is (in_channels, rank)
+        #shape of S is (rank, rank)
+        #shape of Vt is (rank, out_channels)
+        #multiply columns of U by sqrt of singular values
+        #print(U_init.shape, S_init.shape, Vt_init.shape)
+        for i in range(rank):
+            U_init[:, i] = U_init[:, i] * np.sqrt(S_init[i])
+        #multiply rows of Vt by sqrt of singular values
+        for i in range(rank):
+            Vt_init[i, :] = Vt_init[i, :] * np.sqrt(S_init[i])
+        #set the parameters
+        with torch.no_grad():
+            U = torch.tensor(U_init, dtype=torch.float32)
+            S = torch.tensor(Vt_init, dtype=torch.float32)
+            U = U.flatten()
+            S = S.flatten()
+        self.weight = nn.Parameter(torch.cat((U.detach(), S.detach()), dim=0))
+        #self.weight = nn.Parameter(torch.randn(in_channels*rank+out_channels*rank) * 0.01)
         self.rank = rank
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.buffered_M = None
+        #self.plot_weight()
     def get_U(self):
         return self.weight[:self.in_channels*self.rank].view(self.in_channels, self.rank)
     def get_S(self):
@@ -244,7 +288,11 @@ class Custom_point_wise_conv(nn.Module):
             except:
                 rank = 20
                 warn("No rank specified for svd compression, using default rank=20")
-            self.compression_model = weight_svd_compression(in_channels, out_channels, rank=rank)
+            if rank > min(in_channels, out_channels):
+                self.compression_model = weight_no_compression(in_channels, out_channels)
+                warn(f"Rank {rank} greater than min(in_channels, out_channels)={min(in_channels, out_channels)}. Using no compression instead.")
+            else:
+                self.compression_model = weight_svd_compression(in_channels, out_channels, rank=rank)
         elif compression == "nn":
             self.compression_model = weight_nn_compression(in_channels, out_channels)
             #raise a warning as summary doesn't work well with this model
@@ -364,7 +412,7 @@ class ImprovedDSC_2(nn.Module):
                 compression=compression
             )
             layers.append(pointwise_conv)
-            #layers.append(nn.BatchNorm2d(out_channels))
+            layers.append(nn.BatchNorm2d(out_channels))
             if ly != num_layers - 1 or not(correct_relu):  # No ReLU after the last layer
                 layers.append(nn.ReLU())
 

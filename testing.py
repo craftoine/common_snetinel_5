@@ -8,6 +8,8 @@ from archithectures import S5_DSCR, S5_DSCR_S
 from skimage.metrics import structural_similarity as ssim
 import matplotlib.pyplot as plt
 import csv
+from archi_com import *
+
 
 def psnr_gpu(sr, hr_img, device, data_range=1):
     if len(sr.shape)>=3:
@@ -154,6 +156,7 @@ def metric_s5net(model, test_loader, device, network_name,loss_fn_lpips_gpu,save
             lr, hr = lr.to(device), hr.to(device)
             model = model.to(device)  
             output = model(lr,mean = mean, std = std)
+            output = nn.ReLU()(output)#clip to [0; infinity[
             max_hr = hr.max().item()
             output = output/max_hr
             hr = hr/max_hr
@@ -344,7 +347,7 @@ def S5_DSCR_test_on_val_set(params,valid_loader,device,num_bands,loss_fn_lpips_g
         bias=bias,
         compression=compression)
     
-    model.load_state_dict(torch.load(os.path.join(params.save_dir, f"{params.save_prefix}_DSC2_updated_hyperspectral_model.pth")))
+    model.load_state_dict(torch.load(os.path.join(params.save_dir, f"{params.save_prefix}_DSC_residual2_updated_hyperspectral_model.pth")))
 
     """avg_psnr, avg_scc, avg_ssim, avg_lpips, lr_images, hr_images, sr_images = metric_s5net(model, valid_loader, device, 'S5_DSCR_on_val_set',loss_fn_lpips_gpu,params.save_dir,csv_file, plot_hyper=plot_hyper)
     return lr_images, hr_images, sr_images"""
@@ -361,7 +364,6 @@ def bicubic_upsample_test(params,test_loader,device,loss_fn_lpips_gpu,csv_file,p
             x = (x-mean)/std
             x = self.upsample(x)
             x = x * std + mean
-            x = nn.ReLU()(x)
             return x
 
     model = BicubicUpsample(scale_factor=4).to(device)
@@ -379,7 +381,6 @@ def bicubic_upsample_test_on_train_set(params,train_loader,device,loss_fn_lpips_
             x = (x-mean)/std
             x = self.upsample(x)
             x = x * std + mean
-            x = nn.ReLU()(x)
             return x
 
     model = BicubicUpsample(scale_factor=4).to(device)
@@ -397,7 +398,6 @@ def bicubic_upsample_test_on_val_set(params,valid_loader,device,loss_fn_lpips_gp
             x = (x-mean)/std
             x = self.upsample(x)
             x = x * std + mean
-            x = nn.ReLU()(x)
             return x
 
     model = BicubicUpsample(scale_factor=4).to(device)
@@ -415,3 +415,37 @@ def generic_test_on_val_set(model,valid_loader,device,network_name,loss_fn_lpips
 def generic_test(model,test_loader,device,network_name,loss_fn_lpips_gpu,csv_file,params,plot_hyper = True):
     return generic_testing(model,test_loader,device,network_name,loss_fn_lpips_gpu,csv_file,params,plot_hyper)
 
+#plot Custom_point_wise_conv weight matrices from ther trained model
+def plot_custom_point_wise_conv_weights(model, history=""):
+    history += model.__class__.__name__ + "->"
+    #recursively go through the model to find all instances of Custom_point_wise_conv
+    if isinstance(model, Custom_point_wise_conv):
+        print("Found Custom_point_wise_conv in", history)
+        model.compression_model.plot_weight()
+        return
+    if isinstance(model, (nn.Sequential)):
+        for layer in model:
+            plot_custom_point_wise_conv_weights(layer, history=history)
+            return
+    #get all the atributes of the model and check if their are list, nn.Module or nn.Sequential
+    for attr in dir(model):
+        if not attr.startswith('_'):
+            #print("found", attr, "in", history)
+            module = getattr(model, attr)
+            if isinstance(module, nn.ModuleList):
+                print("found nn.ModuleList", attr, "in", history)
+                for item in module:
+                    plot_custom_point_wise_conv_weights(item, history=history+attr+":")
+            elif isinstance(module, nn.Sequential):
+                print("found nn.Sequential", attr, "in", history)
+                for item in module:
+                    plot_custom_point_wise_conv_weights(item, history=history+attr+":")
+            elif isinstance(module, nn.Module):
+                if not isinstance(module, (nn.ReLU, nn.BatchNorm2d, nn.Conv2d, nn.Upsample, nn.MaxPool2d, nn.AdaptiveAvgPool2d)):
+                    print("found nn.Module", attr, "in", history)
+                    plot_custom_point_wise_conv_weights(module, history=history+attr+":")
+            elif isinstance(module, (list)):
+                print("found list", attr, "in", history)
+                for item in module:
+                    plot_custom_point_wise_conv_weights(item, history=history+attr+":")
+    return

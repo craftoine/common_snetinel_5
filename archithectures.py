@@ -28,7 +28,6 @@ class S5_DSCR_S(nn.Module):
             refined = F.interpolate(refined, size=interpolated.shape[2:], mode='bicubic', align_corners=False)
         output = refined + interpolated
         output = output * std + mean
-        output = nn.ReLU()(output)
         return output
     
 
@@ -49,12 +48,11 @@ class S5_DSCR(nn.Module):
         refined = self.dsc_block(interpolated)
         output = refined + interpolated
         output = output * std + mean
-        output = nn.ReLU()(output)
         return output
 
 
 class depth_separable_Unet(nn.Module):
-    def __init__(self, num_spectral_bands, block_n_layers = 2,block_multiplier = 2, n_levels = 1, kernel_size=3,upsample_scale=2,bias=False,depth_multiplier=1,compression="no",bn_conv = False,bn_block = True,level_scale=2):
+    def __init__(self, num_spectral_bands, block_n_layers = 2,block_multiplier = 2, n_levels = 1, kernel_size=3,upsample_scale=2,bias=False,depth_multiplier=1,compression="no",bn_conv = False,bn_block = True,level_scale=2,last_biais= False):
         super(depth_separable_Unet, self).__init__()
         layers_down = []
         l = num_spectral_bands
@@ -106,7 +104,7 @@ class depth_separable_Unet(nn.Module):
         self.layers_up = nn.ModuleList(layers_up)
         self.pool = nn.MaxPool2d(level_scale)
         self.upsample = nn.Upsample(scale_factor=level_scale, mode='bilinear', align_corners=False)
-        self.final_conv = Custom_point_wise_conv(l, num_spectral_bands,bias=bias,compression=compression)
+        self.final_conv = Custom_point_wise_conv(l, num_spectral_bands,bias=last_biais,compression=compression)
         self.relu = nn.ReLU()
         self.num_spectral_bands = num_spectral_bands
         self.block_n_layers = block_n_layers
@@ -141,5 +139,4 @@ class depth_separable_Unet(nn.Module):
         x = self.final_conv(x)
         output = x + interpolated
         output = output * std + mean
-        output = self.relu(output)
         return output
