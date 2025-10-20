@@ -9,11 +9,16 @@ import math
 
 
 class S5_DSCR_S(nn.Module):
-    def __init__(self, in_channels, out_channels, num_spectral_bands, depth_multiplier=1, upsample_scale=2, mode='bilinear',correct_relu = True,same_kernel = False,bias=False,compression="no"):
+    def __init__(self, in_channels, out_channels, num_spectral_bands, depth_multiplier=1, upsample_scale=2, mode='bilinear',correct_relu = True,same_kernel = False,bias=False,compression="no",last_conv = False):
         super(S5_DSCR_S, self).__init__()
         self.interpolation = nn.Upsample(scale_factor=upsample_scale, mode='bicubic', align_corners=False)
-        self.dsc_block = DSC(in_channels, out_channels, num_spectral_bands, depth_multiplier, correct_relu=correct_relu, same_kernel=same_kernel, bias=bias, compression=compression)
+        self.dsc_block = DSC(in_channels, out_channels, num_spectral_bands, depth_multiplier, correct_relu=correct_relu and not(self.last_conv_b), same_kernel=same_kernel, bias=bias, compression=compression)
         self.relu = nn.ReLU()
+        self.correct_relu = correct_relu
+        self.last_conv_b = last_conv
+        self.last_conv = None
+        if last_conv:
+            self.last_conv = Custom_point_wise_conv(out_channels, out_channels,bias=True,compression=compression)
     def forward(self, x, target_size=None,mean=torch.tensor(0.0), std=torch.tensor(1.0)):
         mean, std = mean.to(x.device), std.to(x.device)
         x = (x-mean)/std
@@ -26,6 +31,8 @@ class S5_DSCR_S(nn.Module):
             refined = F.interpolate(refined, size=target_size, mode='bicubic', align_corners=False)"""
         else:
             refined = F.interpolate(refined, size=interpolated.shape[2:], mode='bicubic', align_corners=False)
+        if self.last_conv_b:
+            refined = self.last_conv(refined)
         output = refined + interpolated
         output = output * std + mean
         return output
@@ -36,16 +43,21 @@ class S5_DSCR_S(nn.Module):
 
 
 class S5_DSCR(nn.Module):
-    def __init__(self, in_channels, out_channels, num_spectral_bands, depth_multiplier=1, num_layers=3, kernel_size=3, upsample_scale=2, correct_relu = True, same_kernel = False,bias=False,compression="no"):
+    def __init__(self, in_channels, out_channels, num_spectral_bands, depth_multiplier=1, num_layers=3, kernel_size=3, upsample_scale=2, correct_relu = True, same_kernel = False,bias=False,compression="no",last_conv = False):
         super(S5_DSCR, self).__init__()
         self.interpolation = nn.Upsample(scale_factor=upsample_scale, mode='bicubic', align_corners=False)
-        self.dsc_block = ImprovedDSC_2(in_channels, out_channels, num_spectral_bands, depth_multiplier, num_layers, kernel_size,correct_relu=correct_relu,same_kernel=same_kernel,bias=bias,compression=compression)
-
+        self.dsc_block = ImprovedDSC_2(in_channels, out_channels, num_spectral_bands, depth_multiplier, num_layers, kernel_size,correct_relu=correct_relu and not(last_conv), same_kernel=same_kernel, bias=bias, compression=compression)
+        self.last_conv_b = last_conv
+        self.last_conv = None
+        if last_conv:
+            self.last_conv = Custom_point_wise_conv(out_channels, out_channels,bias=True,compression=compression)
     def forward(self, x, mean=torch.tensor(0), std=torch.tensor(1)):
         mean,std = mean.to(x.device), std.to(x.device)
         x = (x-mean)/std
         interpolated = self.interpolation(x)
         refined = self.dsc_block(interpolated)
+        if self.last_conv_b:
+            refined = self.last_conv(refined)
         output = refined + interpolated
         output = output * std + mean
         return output

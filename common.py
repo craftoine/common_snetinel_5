@@ -92,7 +92,7 @@ class CustomLoader:
 
 def S5_DSCR_S_train(args,train_loader,valid_loader,num_bands,device,correct_relu = True,same_kernel = False, bias = False,compression="no"):
     model = S5_DSCR_S(in_channels=num_bands, 
-                            out_channels=497, 
+                            out_channels=num_bands, 
                             num_spectral_bands=num_bands, 
                             depth_multiplier=1, 
                             upsample_scale=4, 
@@ -109,9 +109,9 @@ def S5_DSCR_S_train(args,train_loader,valid_loader,num_bands,device,correct_relu
 def S5_DSCR_train(args,train_loader,valid_loader,num_bands,device,correct_relu = True, same_kernel = False, bias = False,compression="no"):
 
     model = S5_DSCR(
-        in_channels=497,
-        out_channels=497,
-        num_spectral_bands=497,
+        in_channels=num_bands,
+        out_channels=num_bands,
+        num_spectral_bands=num_bands,
         depth_multiplier=3,
         num_layers=5,
         kernel_size=5,

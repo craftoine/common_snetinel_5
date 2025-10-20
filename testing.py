@@ -244,9 +244,9 @@ def metric_s5net(model, test_loader, device, network_name,loss_fn_lpips_gpu,save
     return avg_psnr, avg_scc,  avg_ssim, avg_lpips, lr_images, hr_images, sr_images
 
 
-def S5_DSCR_S_test(params,test_loader,device,num_bands,loss_fn_lpips_gpu,csv_file, correct_relu = True, same_kernel = False,bias=False,plot_hyper = True,compression="no"):
+def S5_DSCR_S_test(params,test_loader,device,num_bands,loss_fn_lpips_gpu,csv_file, correct_relu = True, same_kernel = False,bias=False,plot_hyper = True,compression="no",last_conv = False):
     model = S5_DSCR_S(in_channels=num_bands, 
-                            out_channels=497, 
+                            out_channels=num_bands,
                             num_spectral_bands=num_bands, 
                             depth_multiplier=1, 
                             upsample_scale=4, 
@@ -254,7 +254,8 @@ def S5_DSCR_S_test(params,test_loader,device,num_bands,loss_fn_lpips_gpu,csv_fil
                             correct_relu=correct_relu,
                             same_kernel=same_kernel,
                             bias=bias,
-                            compression=compression).to(device)
+                            compression=compression,
+                            last_conv=last_conv).to(device)
 
     model.load_state_dict(torch.load(os.path.join(params.save_dir, f"{params.save_prefix}_DSC2_updated_hyperspectral_model.pth")))
 
@@ -263,9 +264,9 @@ def S5_DSCR_S_test(params,test_loader,device,num_bands,loss_fn_lpips_gpu,csv_fil
     return generic_testing(model,test_loader,device,'S5_DSCR_S',loss_fn_lpips_gpu,csv_file,params,plot_hyper)
 
 
-def S5_DSCR_S_test_on_train_set(params,train_loader,device,num_bands,loss_fn_lpips_gpu,csv_file, correct_relu = True, same_kernel = False,bias=False,plot_hyper = True,compression="no"):
+def S5_DSCR_S_test_on_train_set(params,train_loader,device,num_bands,loss_fn_lpips_gpu,csv_file, correct_relu = True, same_kernel = False,bias=False,plot_hyper = True,compression="no",last_conv = False):
     model = S5_DSCR_S(in_channels=num_bands, 
-                            out_channels=497, 
+                            out_channels=num_bands, 
                             num_spectral_bands=num_bands, 
                             depth_multiplier=1, 
                             upsample_scale=4, 
@@ -273,16 +274,17 @@ def S5_DSCR_S_test_on_train_set(params,train_loader,device,num_bands,loss_fn_lpi
                             correct_relu=correct_relu,
                             same_kernel=same_kernel,
                             bias=bias,
-                            compression=compression).to(device)
+                            compression=compression,
+                            last_conv=last_conv).to(device)
 
     model.load_state_dict(torch.load(os.path.join(params.save_dir, f"{params.save_prefix}_DSC2_updated_hyperspectral_model.pth")))
 
     """avg_psnr, avg_scc, avg_ssim, avg_lpips, lr_images, hr_images, sr_images = metric_s5net(model, train_loader, device, 'S5_DSCR_S',loss_fn_lpips_gpu,params.save_dir,csv_file, plot_hyper=plot_hyper)
     return lr_images, hr_images, sr_images"""
     return generic_testing(model,train_loader,device,'S5_DSCR_S_on_train_set',loss_fn_lpips_gpu,csv_file,params,plot_hyper)
-def S5_DSCR_S_test_on_val_set(params,valid_loader,device,num_bands,loss_fn_lpips_gpu,csv_file, correct_relu = True, same_kernel = False,bias=False,plot_hyper = True,compression="no"):
+def S5_DSCR_S_test_on_val_set(params,valid_loader,device,num_bands,loss_fn_lpips_gpu,csv_file, correct_relu = True, same_kernel = False,bias=False,plot_hyper = True,compression="no",last_conv = False):
     model = S5_DSCR_S(in_channels=num_bands, 
-                            out_channels=497, 
+                            out_channels=num_bands, 
                             num_spectral_bands=num_bands, 
                             depth_multiplier=1, 
                             upsample_scale=4, 
@@ -290,18 +292,20 @@ def S5_DSCR_S_test_on_val_set(params,valid_loader,device,num_bands,loss_fn_lpips
                             correct_relu=correct_relu,
                             same_kernel=same_kernel,
                             bias=bias,
-                            compression=compression).to(device)
+                            compression=compression,
+                            last_conv=last_conv
+                            ).to(device)
 
     model.load_state_dict(torch.load(os.path.join(params.save_dir, f"{params.save_prefix}_DSC2_updated_hyperspectral_model.pth")))
 
     """avg_psnr, avg_scc, avg_ssim, avg_lpips, lr_images, hr_images, sr_images = metric_s5net(model, valid_loader, device, 'S5_DSCR_S',loss_fn_lpips_gpu,params.save_dir,csv_file, plot_hyper=plot_hyper)
     return lr_images, hr_images, sr_images"""
     return generic_testing(model,valid_loader,device,'S5_DSCR_S',loss_fn_lpips_gpu,csv_file,params,plot_hyper)
-def S5_DSCR_test(params,test_loader,device,num_bands,loss_fn_lpips_gpu,csv_file, correct_relu = True, same_kernel = False,bias=False,plot_hyper = True,compression="no"):
+def S5_DSCR_test(params,test_loader,device,num_bands,loss_fn_lpips_gpu,csv_file, correct_relu = True, same_kernel = False,bias=False,plot_hyper = True,compression="no",last_conv = False):
     model = S5_DSCR(
-        in_channels=497,
-        out_channels=497,
-        num_spectral_bands=497,
+        in_channels=num_bands,
+        out_channels=num_bands,
+        num_spectral_bands=num_bands,
         depth_multiplier=3,
         num_layers=5,
         kernel_size=5,
@@ -309,17 +313,19 @@ def S5_DSCR_test(params,test_loader,device,num_bands,loss_fn_lpips_gpu,csv_file,
         correct_relu=correct_relu,
         same_kernel=same_kernel,
         bias=bias,
-        compression=compression)
+        compression=compression,
+        last_conv=last_conv
+    ).to(device)
 
     model.load_state_dict(torch.load(os.path.join(params.save_dir, f"{params.save_prefix}_DSC_residual2_updated_hyperspectral_model.pth")))
     """avg_psnr, avg_scc, avg_ssim, avg_lpips, lr_images, hr_images, sr_images = metric_s5net(model, test_loader, device,'S5_DSCR',loss_fn_lpips_gpu,params.save_dir,csv_file, plot_hyper=plot_hyper)
     return lr_images, hr_images, sr_images"""
     return generic_testing(model,test_loader,device,'S5_DSCR',loss_fn_lpips_gpu,csv_file,params,plot_hyper)
-def S5_DSCR_test_on_train_set(params,train_loader,device,num_bands,loss_fn_lpips_gpu,csv_file, correct_relu = True, same_kernel = False,bias=False,plot_hyper = True,compression="no"):
+def S5_DSCR_test_on_train_set(params,train_loader,device,num_bands,loss_fn_lpips_gpu,csv_file, correct_relu = True, same_kernel = False,bias=False,plot_hyper = True,compression="no",last_conv = False):
     model = S5_DSCR(
-        in_channels=497,
-        out_channels=497,
-        num_spectral_bands=497,
+        in_channels=num_bands,
+        out_channels=num_bands,
+        num_spectral_bands=num_bands,
         depth_multiplier=3,
         num_layers=5,
         kernel_size=5,
@@ -327,17 +333,19 @@ def S5_DSCR_test_on_train_set(params,train_loader,device,num_bands,loss_fn_lpips
         correct_relu=correct_relu,
         same_kernel=same_kernel,
         bias=bias,
-        compression=compression)
+        compression=compression,
+        last_conv=last_conv
+    ).to(device)
 
     model.load_state_dict(torch.load(os.path.join(params.save_dir, f"{params.save_prefix}_DSC_residual2_updated_hyperspectral_model.pth")))
     """avg_psnr, avg_scc, avg_ssim, avg_lpips, lr_images, hr_images, sr_images = metric_s5net(model, train_loader, device,'S5_DSCR_on_train_set',loss_fn_lpips_gpu,params.save_dir,csv_file, plot_hyper=plot_hyper)
     return lr_images, hr_images, sr_images"""
     return generic_testing(model,train_loader,device,'S5_DSCR_on_train_set',loss_fn_lpips_gpu,csv_file,params,plot_hyper)
-def S5_DSCR_test_on_val_set(params,valid_loader,device,num_bands,loss_fn_lpips_gpu,csv_file, correct_relu = True, same_kernel = False,bias=False,plot_hyper = True,compression="no"):
+def S5_DSCR_test_on_val_set(params,valid_loader,device,num_bands,loss_fn_lpips_gpu,csv_file, correct_relu = True, same_kernel = False,bias=False,plot_hyper = True,compression="no",last_conv = False):
     model = S5_DSCR(
-        in_channels=497,
-        out_channels=497,
-        num_spectral_bands=497,
+        in_channels=num_bands,
+        out_channels=num_bands,
+        num_spectral_bands=num_bands,
         depth_multiplier=3,
         num_layers=5,
         kernel_size=5,
@@ -345,7 +353,9 @@ def S5_DSCR_test_on_val_set(params,valid_loader,device,num_bands,loss_fn_lpips_g
         correct_relu=correct_relu,
         same_kernel=same_kernel,
         bias=bias,
-        compression=compression)
+        compression=compression,
+        last_conv=last_conv
+    ).to(device)
     
     model.load_state_dict(torch.load(os.path.join(params.save_dir, f"{params.save_prefix}_DSC_residual2_updated_hyperspectral_model.pth")))
 
