@@ -90,7 +90,7 @@ class CustomLoader:
         self.std = torch.tensor(std,dtype=torch.float32).view(1, -1, 1, 1)
 
 
-def S5_DSCR_S_train(args,train_loader,valid_loader,num_bands,device,correct_relu = True,same_kernel = False, bias = False,compression="no"):
+def S5_DSCR_S_train(args,train_loader,valid_loader,num_bands,device,correct_relu = True,same_kernel = False, bias = False,compression="no",last_conv = False):
     model = S5_DSCR_S(in_channels=num_bands, 
                             out_channels=num_bands, 
                             num_spectral_bands=num_bands, 
@@ -100,13 +100,14 @@ def S5_DSCR_S_train(args,train_loader,valid_loader,num_bands,device,correct_relu
                             correct_relu=correct_relu,
                             same_kernel=same_kernel,
                             bias=bias,
-                            compression=compression).to(device)
+                            compression=compression,
+                            last_conv=last_conv).to(device)
     model_name = 'DSC2'
     return generic_train(model,model_name,args,train_loader,valid_loader,num_bands,device)
 
 
 
-def S5_DSCR_train(args,train_loader,valid_loader,num_bands,device,correct_relu = True, same_kernel = False, bias = False,compression="no"):
+def S5_DSCR_train(args,train_loader,valid_loader,num_bands,device,correct_relu = True, same_kernel = False, bias = False,compression="no",last_conv = False):
 
     model = S5_DSCR(
         in_channels=num_bands,
@@ -119,7 +120,8 @@ def S5_DSCR_train(args,train_loader,valid_loader,num_bands,device,correct_relu =
         correct_relu=correct_relu,
         same_kernel=same_kernel,
         bias=bias,
-        compression=compression).to(device)
+        compression=compression,
+        last_conv=last_conv).to(device)
     model_name = 'DSC_residual2'
     return generic_train(model,model_name,args,train_loader,valid_loader,num_bands,device)
 
