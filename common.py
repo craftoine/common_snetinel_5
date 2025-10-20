@@ -90,7 +90,7 @@ class CustomLoader:
         self.std = torch.tensor(std,dtype=torch.float32).view(1, -1, 1, 1)
 
 
-def S5_DSCR_S_train(args,train_loader,valid_loader,num_bands,device,correct_relu = True,same_kernel = False, bias = False,compression="no",last_conv = False):
+def S5_DSCR_S_train(args,train_loader,valid_loader,num_bands,device,correct_relu = True,same_kernel = False, bias = False,compression="no",last_conv = False,min_val_stopping = False,mean=torch.tensor(0.0), std=torch.tensor(1.0)):
     model = S5_DSCR_S(in_channels=num_bands, 
                             out_channels=num_bands, 
                             num_spectral_bands=num_bands, 
@@ -101,13 +101,15 @@ def S5_DSCR_S_train(args,train_loader,valid_loader,num_bands,device,correct_relu
                             same_kernel=same_kernel,
                             bias=bias,
                             compression=compression,
-                            last_conv=last_conv).to(device)
+                            last_conv=last_conv,
+                            mean=mean,
+                            std=std).to(device)
     model_name = 'DSC2'
-    return generic_train(model,model_name,args,train_loader,valid_loader,num_bands,device)
+    return generic_train(model,model_name,args,train_loader,valid_loader,num_bands,device,min_val_stopping=min_val_stopping)
 
 
 
-def S5_DSCR_train(args,train_loader,valid_loader,num_bands,device,correct_relu = True, same_kernel = False, bias = False,compression="no",last_conv = False):
+def S5_DSCR_train(args,train_loader,valid_loader,num_bands,device,correct_relu = True, same_kernel = False, bias = False,compression="no",last_conv = False,min_val_stopping = False,mean=torch.tensor(0.0), std=torch.tensor(1.0)):
 
     model = S5_DSCR(
         in_channels=num_bands,
@@ -121,12 +123,15 @@ def S5_DSCR_train(args,train_loader,valid_loader,num_bands,device,correct_relu =
         same_kernel=same_kernel,
         bias=bias,
         compression=compression,
-        last_conv=last_conv).to(device)
+        last_conv=last_conv,
+        mean=mean,
+        std=std
+    ).to(device)
     model_name = 'DSC_residual2'
-    return generic_train(model,model_name,args,train_loader,valid_loader,num_bands,device)
+    return generic_train(model,model_name,args,train_loader,valid_loader,num_bands,device,min_val_stopping=min_val_stopping)
 
 
-def generic_train(model,model_name,args,train_loader,valid_loader,num_bands,device):
+def generic_train(model,model_name,args,train_loader,valid_loader,num_bands,device,min_val_stopping=False):
     model = model.to(device)
     summary(model, input_size=(num_bands, 64, 64))
 
@@ -138,7 +143,9 @@ def generic_train(model,model_name,args,train_loader,valid_loader,num_bands,devi
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=3, factor=0.1)
 
     train_losses, val_losses = [], []
-    
+    min_loss_val = float('inf')
+    model_to_save = None
+    stopped_epoch = -1
     for epoch in range(args.nepochs):
         model.train()
         epoch_loss = 0
@@ -146,7 +153,7 @@ def generic_train(model,model_name,args,train_loader,valid_loader,num_bands,devi
         for batch_idx, (lr, hr) in enumerate(train_loader.loader):
             lr, hr = lr.to(device), hr.to(device)
             optimizer.zero_grad()
-            output = model(lr, mean=mean, std=std)
+            output = model(lr)
             #normalize output and hr to [0, 1] based on hr min and max on each datapoint and each channel
             #shape of output and hr is (batch_size,channels, height, width)
             max_hr = hr.max()
@@ -174,25 +181,36 @@ def generic_train(model,model_name,args,train_loader,valid_loader,num_bands,devi
             mean, std = valid_loader.mean, valid_loader.std
             for lr, hr in valid_loader.loader:
                 lr, hr = lr.to(device), hr.to(device)
-                output = model(lr, mean=mean, std=std)
+                output = model(lr)
                 #normalize output and hr to [0, 1] based on hr min and max on each datapoint and each channel
                 max_hr = hr.max()
                 output = output / max_hr
                 hr = hr / max_hr
                 val_loss += criterion(output, hr).item()
-
+        if min_val_stopping:
+            if val_loss/len(valid_loader.loader) < min_loss_val:
+                min_loss_val = val_loss/len(valid_loader.loader)
+                model_to_save = model.state_dict()
+                stopped_epoch = epoch
         train_losses.append(epoch_loss / len(train_loader.loader))
         val_losses.append(val_loss / len(valid_loader.loader))
-        
         print(f"Epoch {epoch+1}/{args.nepochs}, Train Loss: {train_losses[-1]}, Validation Loss: {val_losses[-1]}")
         writer_tensor.add_scalar('Loss/Train', train_losses[-1], epoch)
         writer_tensor.add_scalar('Loss/Validation', val_losses[-1], epoch)
         scheduler.step(val_losses[-1])
 
     writer_tensor.close()
+    if min_val_stopping:
+        if stopped_epoch != args.nepochs - 1:
+            print(f"Training stopped at epoch {stopped_epoch+1} with minimum validation loss: {min_loss_val}")
+        else:
+            print("Minimum of validation not reached during training.")
 
     try:
-        torch.save(model.state_dict(), os.path.join(args.save_dir, f"{args.save_prefix}_{model_name}_updated_hyperspectral_model.pth"))
+        if min_val_stopping and model_to_save is not None:
+            torch.save(model_to_save, os.path.join(args.save_dir, f"{args.save_prefix}_{model_name}_updated_hyperspectral_model.pth"))
+        else:
+            torch.save(model.state_dict(), os.path.join(args.save_dir, f"{args.save_prefix}_{model_name}_updated_hyperspectral_model.pth"))
         print('Model saved successfully.')
     except Exception as e:
         print(f"Error saving model: {e}")
