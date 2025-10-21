@@ -147,6 +147,8 @@ def generic_train(model,model_name,args,train_loader,valid_loader,num_bands,devi
     model_to_save = None
     stopped_epoch = -1
     for epoch in range(args.nepochs):
+        #print the epoch number and the learning rate but not returning to the line so next prints will overwrite it
+        print("epoch", epoch+1, "/", args.nepochs, " lr:", optimizer.param_groups[0]['lr'], "\r", end="")
         model.train()
         epoch_loss = 0
         mean, std = train_loader.mean, train_loader.std
@@ -156,7 +158,11 @@ def generic_train(model,model_name,args,train_loader,valid_loader,num_bands,devi
             output = model(lr)
             #normalize output and hr to [0, 1] based on hr min and max on each datapoint and each channel
             #shape of output and hr is (batch_size,channels, height, width)
-            max_hr = hr.max()
+            """max_hr = hr.max()
+            output = output / max_hr
+            hr = hr / max_hr"""
+            #compute the mach of each image in the batch
+            max_hr = hr.view(hr.size(0), -1).max(1)[0].view(-1, 1, 1, 1)
             output = output / max_hr
             hr = hr / max_hr
             
@@ -183,7 +189,11 @@ def generic_train(model,model_name,args,train_loader,valid_loader,num_bands,devi
                 lr, hr = lr.to(device), hr.to(device)
                 output = model(lr)
                 #normalize output and hr to [0, 1] based on hr min and max on each datapoint and each channel
-                max_hr = hr.max()
+                """max_hr = hr.max()
+                output = output / max_hr
+                hr = hr / max_hr"""
+                #compute the mach of each image in the batch
+                max_hr = hr.view(hr.size(0), -1).max(1)[0].view(-1, 1, 1, 1)
                 output = output / max_hr
                 hr = hr / max_hr
                 val_loss += criterion(output, hr).item()

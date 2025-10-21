@@ -157,10 +157,14 @@ def metric_s5net(model, test_loader, device, network_name,loss_fn_lpips_gpu,save
             model = model.to(device)  
             output = model(lr)
             output = nn.ReLU()(output)#clip to [0; infinity[
-            max_hr = hr.max().item()
+            """max_hr = hr.max().item()
             output = output/max_hr
             hr = hr/max_hr
-            lr = lr/max_hr
+            lr = lr/max_hr"""
+            max_hr = hr.view(hr.size(0), -1).max(1)[0].view(-1, 1, 1, 1)
+            output = output / max_hr
+            hr = hr / max_hr
+            lr = lr / max_hr
             for i in range(output.shape[0]):
                 sr = output[i].squeeze()
                 hr_img = hr[i].squeeze()
