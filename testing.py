@@ -447,28 +447,29 @@ def plot_custom_point_wise_conv_weights(model, history=""):
         model.compression_model.plot_weight()
         return
     if isinstance(model, (nn.Sequential)):
-        for layer in model:
-            plot_custom_point_wise_conv_weights(layer, history=history)
-            return
+        print("Found nn.Sequential of size", len(model), "in", history)
+        for i, layer in enumerate(model):
+            plot_custom_point_wise_conv_weights(layer, history=history+"["+str(i)+"]:")
+        return
     #get all the atributes of the model and check if their are list, nn.Module or nn.Sequential
     for attr in dir(model):
         if not attr.startswith('_'):
             #print("found", attr, "in", history)
             module = getattr(model, attr)
             if isinstance(module, nn.ModuleList):
-                print("found nn.ModuleList", attr, "in", history)
-                for item in module:
-                    plot_custom_point_wise_conv_weights(item, history=history+attr+":")
+                print("found nn.ModuleList", attr,"of size", len(module), "in", history)
+                for i, item in enumerate(module):
+                    plot_custom_point_wise_conv_weights(item, history=history+attr+"["+str(i)+"]:")
             elif isinstance(module, nn.Sequential):
-                print("found nn.Sequential", attr, "in", history)
-                for item in module:
-                    plot_custom_point_wise_conv_weights(item, history=history+attr+":")
+                print("found nn.Sequential", attr,"of size", len(module), "in", history)
+                for i, item in enumerate(module):
+                    plot_custom_point_wise_conv_weights(item, history=history+attr+"["+str(i)+"]:")
             elif isinstance(module, nn.Module):
                 if not isinstance(module, (nn.ReLU, nn.BatchNorm2d, nn.Conv2d, nn.Upsample, nn.MaxPool2d, nn.AdaptiveAvgPool2d)):
                     print("found nn.Module", attr, "in", history)
                     plot_custom_point_wise_conv_weights(module, history=history+attr+":")
             elif isinstance(module, (list)):
-                print("found list", attr, "in", history)
-                for item in module:
-                    plot_custom_point_wise_conv_weights(item, history=history+attr+":")
+                print("found list", attr,"of size", len(module), "in", history)
+                for i, item in enumerate(module):
+                    plot_custom_point_wise_conv_weights(item, history=history+attr+"["+str(i)+"]:")
     return

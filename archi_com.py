@@ -302,6 +302,8 @@ class Custom_point_wise_conv(nn.Module):
         self.bias = None
         if bias:
             self.bias = nn.Parameter(torch.zeros(out_channels))
+            #create an empty,trainable, null size weight to avoid errors in torchsummary (else the bias is not considered as trainable parameter)
+            self.weight = nn.Parameter(torch.empty(0))
         
     def forward(self, x):
         #no need of conv because it's a 1x1 conv, use matrix multiplication instead
