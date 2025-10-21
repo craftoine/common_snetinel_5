@@ -382,52 +382,55 @@ def S5_DSCR_test_on_val_set(params,valid_loader,device,num_bands,loss_fn_lpips_g
 
 def bicubic_upsample_test(params,test_loader,device,loss_fn_lpips_gpu,csv_file,plot_hyper = True):
     class BicubicUpsample(nn.Module):
-        def __init__(self, scale_factor=4):
+        def __init__(self, scale_factor=4,mean=torch.tensor(0.0),std=torch.tensor(1.0)):
             super(BicubicUpsample, self).__init__()
             self.upsample = nn.Upsample(scale_factor=scale_factor, mode='bicubic', align_corners=False)
+            self.mean = nn.Parameter(mean, requires_grad=False)
+            self.std = nn.Parameter(std, requires_grad=False)
 
-        def forward(self, x,mean=torch.tensor(0.0),std=torch.tensor(1.0)):
-            mean, std = mean.to(device), std.to(device)
-            x = (x-mean)/std
+        def forward(self, x):
+            x = (x - self.mean) / self.std
             x = self.upsample(x)
-            x = x * std + mean
+            x = x * self.std + self.mean
             return x
 
-    model = BicubicUpsample(scale_factor=4).to(device)
+    model = BicubicUpsample(scale_factor=4,mean=test_loader.mean,std=test_loader.std).to(device)
     """avg_psnr, avg_scc, avg_ssim, avg_lpips, lr_images, hr_images, sr_images = metric_s5net(model, test_loader, device, 'Bicubic_Upsample',loss_fn_lpips_gpu,params.save_dir,csv_file, plot_hyper=plot_hyper)
     return lr_images, hr_images, sr_images"""
     return generic_testing(model,test_loader,device,'Bicubic_Upsample',loss_fn_lpips_gpu,csv_file,params,plot_hyper)
 def bicubic_upsample_test_on_train_set(params,train_loader,device,loss_fn_lpips_gpu,csv_file,plot_hyper = True):
     class BicubicUpsample(nn.Module):
-        def __init__(self, scale_factor=4):
+        def __init__(self, scale_factor=4,mean=torch.tensor(0.0),std=torch.tensor(1.0)):
             super(BicubicUpsample, self).__init__()
             self.upsample = nn.Upsample(scale_factor=scale_factor, mode='bicubic', align_corners=False)
+            self.mean = nn.Parameter(mean, requires_grad=False)
+            self.std = nn.Parameter(std, requires_grad=False)
 
-        def forward(self, x,mean=torch.tensor(0.0),std=torch.tensor(1.0)):
-            mean, std = mean.to(device), std.to(device)
-            x = (x-mean)/std
+        def forward(self, x):
+            x = (x - self.mean) / self.std
             x = self.upsample(x)
-            x = x * std + mean
+            x = x * self.std + self.mean
             return x
 
-    model = BicubicUpsample(scale_factor=4).to(device)
+    model = BicubicUpsample(scale_factor=4,mean=train_loader.mean,std=train_loader.std).to(device)
     """avg_psnr, avg_scc, avg_ssim, avg_lpips, lr_images, hr_images, sr_images = metric_s5net(model, train_loader, device, 'Bicubic_Upsample_on_train_set',loss_fn_lpips_gpu,params.save_dir,csv_file, plot_hyper=plot_hyper)
     return lr_images, hr_images, sr_images"""
     return generic_testing(model,train_loader,device,'Bicubic_Upsample_on_train_set',loss_fn_lpips_gpu,csv_file,params,plot_hyper)
 def bicubic_upsample_test_on_val_set(params,valid_loader,device,loss_fn_lpips_gpu,csv_file,plot_hyper = True):
     class BicubicUpsample(nn.Module):
-        def __init__(self, scale_factor=4):
+        def __init__(self, scale_factor=4,mean=torch.tensor(0.0),std=torch.tensor(1.0)):
             super(BicubicUpsample, self).__init__()
             self.upsample = nn.Upsample(scale_factor=scale_factor, mode='bicubic', align_corners=False)
+            self.mean = nn.Parameter(mean, requires_grad=False)
+            self.std = nn.Parameter(std, requires_grad=False)
 
-        def forward(self, x,mean=torch.tensor(0.0),std=torch.tensor(1.0)):
-            mean, std = mean.to(device), std.to(device)
-            x = (x-mean)/std
+        def forward(self, x):
+            x = (x - self.mean) / self.std
             x = self.upsample(x)
-            x = x * std + mean
+            x = x * self.std + self.mean
             return x
 
-    model = BicubicUpsample(scale_factor=4).to(device)
+    model = BicubicUpsample(scale_factor=4,mean=valid_loader.mean,std=valid_loader.std).to(device)
     """avg_psnr, avg_scc, avg_ssim, avg_lpips, lr_images, hr_images, sr_images = metric_s5net(model, valid_loader, device, 'Bicubic_Upsample_on_val_set',loss_fn_lpips_gpu,params.save_dir,csv_file, plot_hyper=plot_hyper)
     return lr_images, hr_images, sr_images"""
     return generic_testing(model,valid_loader,device,'Bicubic_Upsample_on_val_set',loss_fn_lpips_gpu,csv_file,params,plot_hyper)
