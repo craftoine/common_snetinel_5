@@ -337,12 +337,11 @@ class DSC(nn.Module):
                                         bias=bias)"""
         self.pointwise_conv = Custom_point_wise_conv(in_channels=num_spectral_bands * depth_multiplier,
                                                     out_channels=out_channels,
-                                                    bias=bias,
+                                                    bias=bias or (correct_relu),
                                                     compression=compression)
-        
-        self.bn = nn.BatchNorm2d(out_channels)
         self.correct_relu = correct_relu
         if not(self.correct_relu):
+            self.bn = nn.BatchNorm2d(out_channels)
             self.relu = nn.ReLU()
         
     def forward(self, x):
@@ -356,8 +355,8 @@ class DSC(nn.Module):
         if self.same_kernel:
             x = x.view(shape_0, shape_1 * x.size(1), x.size(2), x.size(3))  # Reshape back
         x = self.pointwise_conv(x)
-        #x = self.bn(x)
         if not(self.correct_relu):
+            x = self.bn(x)
             x = self.relu(x)
         return x
     
@@ -410,12 +409,12 @@ class ImprovedDSC_2(nn.Module):
             pointwise_conv = Custom_point_wise_conv(
                 in_channels=num_spectral_bands * depth_multiplier,
                 out_channels=out_channels,
-                bias=bias,
+                bias=bias or (ly == num_layers - 1 and correct_relu),
                 compression=compression
             )
             layers.append(pointwise_conv)
-            layers.append(nn.BatchNorm2d(out_channels))
             if ly != num_layers - 1 or not(correct_relu):  # No ReLU after the last layer
+                layers.append(nn.BatchNorm2d(out_channels))
                 layers.append(nn.ReLU())
 
         self.conv_layers = nn.Sequential(*layers)
