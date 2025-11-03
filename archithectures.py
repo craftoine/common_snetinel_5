@@ -23,6 +23,8 @@ class S5_DSCR_S(nn.Module):
         self.std = nn.Parameter(std.view(1, -1, 1, 1), requires_grad=False)
 
     def forward(self, x, target_size=None):
+        #clip x to be compatible with equivariant loss
+        x = nn.ReLU()(x)
         x = (x-self.mean)/self.std
         interpolated = self.interpolation(x)
         refined = self.dsc_block(interpolated)
@@ -57,6 +59,8 @@ class S5_DSCR(nn.Module):
         self.std = nn.Parameter(std.view(1, -1, 1, 1), requires_grad=False)
 
     def forward(self, x):
+        #clip x to be compatible with equivariant loss
+        x = nn.ReLU()(x)
         x = (x-self.mean)/self.std
         interpolated = self.interpolation(x)
         refined = self.dsc_block(interpolated)
@@ -134,6 +138,8 @@ class depth_separable_Unet(nn.Module):
         self.mean = nn.Parameter(mean.view(1, -1, 1, 1), requires_grad=False)
         self.std = nn.Parameter(std.view(1, -1, 1, 1), requires_grad=False)
     def forward(self, x):
+        #clip x to be compatible with equivariant loss
+        x = nn.ReLU()(x)
         x = (x-self.mean)/self.std
         interpolated = self.interpolation(x)
         x = interpolated

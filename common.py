@@ -81,6 +81,7 @@ def plot_hyperspectral_images_false_color_train(lr_img, hr_img, pred_img, idx, b
 
 class CustomLoader:
     def __init__(self, data, mean,std, *args, **kwargs):
+        print("len of data:", len(data))
         self.loader = DataLoader(data, *args, **kwargs)
         """self.mean = mean
         self.std = std"""
@@ -161,10 +162,10 @@ def generic_train(model,model_name,args,train_loader,valid_loader,num_bands,devi
             """max_hr = hr.max()
             output = output / max_hr
             hr = hr / max_hr"""
-            #compute the mach of each image in the batch
-            max_hr = hr.view(hr.size(0), -1).max(1)[0].view(-1, 1, 1, 1)
-            output = output / max_hr
-            hr = hr / max_hr
+            #compute the max of each image in the batch
+            max_lr = lr.view(lr.size(0), -1).max(1)[0].view(-1, 1, 1, 1)
+            output = output / max_lr
+            hr = hr / max_lr
             
             loss = criterion(output, hr)
             loss.backward()
@@ -192,10 +193,10 @@ def generic_train(model,model_name,args,train_loader,valid_loader,num_bands,devi
                 """max_hr = hr.max()
                 output = output / max_hr
                 hr = hr / max_hr"""
-                #compute the mach of each image in the batch
-                max_hr = hr.view(hr.size(0), -1).max(1)[0].view(-1, 1, 1, 1)
-                output = output / max_hr
-                hr = hr / max_hr
+                #compute the max of each image in the batch
+                max_lr = lr.view(lr.size(0), -1).max(1)[0].view(-1, 1, 1, 1)
+                output = output / max_lr
+                hr = hr / max_lr
                 val_loss += criterion(output, hr).item()
         if min_val_stopping:
             if val_loss/len(valid_loader.loader) < min_loss_val:
@@ -219,6 +220,7 @@ def generic_train(model,model_name,args,train_loader,valid_loader,num_bands,devi
     try:
         if min_val_stopping and model_to_save is not None:
             torch.save(model_to_save, os.path.join(args.save_dir, f"{args.save_prefix}_{model_name}_updated_hyperspectral_model.pth"))
+            model.load_state_dict(model_to_save)
         else:
             torch.save(model.state_dict(), os.path.join(args.save_dir, f"{args.save_prefix}_{model_name}_updated_hyperspectral_model.pth"))
         print('Model saved successfully.')

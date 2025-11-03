@@ -1,3 +1,4 @@
+from multiprocessing import reduction
 import torch
 import numpy as np
 from scipy.ndimage import sobel
@@ -9,7 +10,10 @@ from skimage.metrics import structural_similarity as ssim
 import matplotlib.pyplot as plt
 import csv
 from archi_com import *
-
+import torch.nn.functional as F
+from torchmetrics.image import SpatialCorrelationCoefficient as scc_gpu
+from torchmetrics.regression import CosineSimilarity as cs_gpu
+from torchmetrics.image import StructuralSimilarityIndexMeasure as ssim_gpu
 
 def psnr_gpu(sr, hr_img, device, data_range=1):
     if len(sr.shape)>=3:
@@ -72,6 +76,39 @@ def scc(sr, hr):
     scc_value /= np.sqrt(np.sum(hr_lap**2))
 
     return scc_value, scc_map
+
+def sobel_gpu(img, mode='reflect', device='cpu'):
+    #img of shape (B, C, H, W)
+    #create 2 3*1 and 1*3 sobel kernels
+    B, C, H, W = img.shape
+    kernel_x = torch.tensor([-1., 0., 1.], dtype=img.dtype, device=device).view(1, 1, 1, 3).expand(1,C,1,3)
+    kernel_y = torch.tensor([1., -2., 1.], dtype=img.dtype, device=device).view(1, 1, 3, 1).expand(1,C,3,1)
+    img_pad_x = F.pad(img, (1, 1, 0, 0), mode=mode)
+    img_x = F.conv2d(img_pad_x, kernel_x, padding=0)
+    img_pad_y = F.pad(img_x, (0, 0, 1, 1), mode=mode)
+    img_y = F.conv2d(img_pad_y, kernel_y, padding=0)
+    return img_y
+
+
+class scc_gpu__(nn.Module):
+    def __init__(self, reduction='mean'):
+        super(scc_gpu, self).__init__()
+        self.reduction = reduction
+    def forward(self, sr, hr):
+        #sr and hr of shape (B, C, H, W)
+        #apply sobel-like filter per channel then cosine similarity
+        sr_lap_x = sobel_gpu(sr, device=sr.device)
+        sr_lap_y = sobel_gpu(sr.transpose(2,3), device=sr.device).transpose(2,3)
+        sr_lap = torch.sqrt(sr_lap_x**2 + sr_lap_y**2)
+        hr_lap_x = sobel_gpu(hr, device=hr.device)
+        hr_lap_y = sobel_gpu(hr.transpose(2,3), device=hr.device).transpose(2,3)
+        hr_lap = torch.sqrt(hr_lap_x**2 + hr_lap_y**2)
+        cs = torch.sum(sr_lap * hr_lap, dim=(1,2,3)) / (torch.sqrt(torch.sum(sr_lap**2, dim=(1,2,3))) * torch.sqrt(torch.sum(hr_lap**2, dim=(1,2,3))))
+        if self.reduction == 'mean':
+            return torch.mean(cs)
+        else:
+            return torch.sum(cs)
+
 def calculate_lpips_bandwise(sr, hr, loss_fn_gpu, device):
     lpips_bandwise = []
     num_bands = sr.shape[2]  # Assume shape (H, W, C) for hyperspectral
@@ -161,10 +198,10 @@ def metric_s5net(model, test_loader, device, network_name,loss_fn_lpips_gpu,save
             output = output/max_hr
             hr = hr/max_hr
             lr = lr/max_hr"""
-            max_hr = hr.view(hr.size(0), -1).max(1)[0].view(-1, 1, 1, 1)
-            output = output / max_hr
-            hr = hr / max_hr
-            lr = lr / max_hr
+            max_lr = lr.view(lr.size(0), -1).max(1)[0].view(-1, 1, 1, 1)
+            output = output / max_lr
+            hr = hr / max_lr
+            lr = lr / max_lr
             for i in range(output.shape[0]):
                 sr = output[i].squeeze()
                 hr_img = hr[i].squeeze()
@@ -183,14 +220,18 @@ def metric_s5net(model, test_loader, device, network_name,loss_fn_lpips_gpu,save
 
                 
                 psnr_value = psnr_gpu(sr, hr_img,device, data_range=1).item()  # [0, 1] range
+                scc_metric = scc_gpu().to(device)
+                scc_value = scc_metric(sr.unsqueeze(0), hr_img.unsqueeze(0)).item()  # [0, 1]
 
+                ssim_metric = ssim_gpu(data_range=1.0).to(device)
+                ssim_value = ssim_metric(sr.unsqueeze(0), hr_img.unsqueeze(0)).item()  # [0, 1]
                 #need of numpy array for scc and ssim
                 sr = sr.cpu().numpy()
                 hr_img = hr_img.cpu().numpy()
                 lr_img = lr_img.cpu().numpy()
 
-                scc_value, _ = scc(sr, hr_img)
-                ssim_value = ssim(hr_img, sr, data_range=1)  # [0, 1] range
+                #scc_value, _ = scc(sr, hr_img)
+                #ssim_value = ssim(hr_img, sr, data_range=1)  # [0, 1] range
                 
                 #compute on gpu instead of cpu
 

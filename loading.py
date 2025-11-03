@@ -2,7 +2,7 @@ import scipy.io as sio
 import numpy as np
 import torch
 import os
-
+import matplotlib.pyplot as plt
 
 
 def compute_global_metrics(lr_files, hr_files):
@@ -19,7 +19,7 @@ def compute_global_metrics(lr_files, hr_files):
             #keep the channel separately
             all_intensity_values.append(lr_image.reshape(-1, lr_image.shape[2]))
             all_intensity_values.append(hr_image.reshape(-1, hr_image.shape[2]))
-            print("nb: channels =", lr_image.shape[2])
+            #print("nb: channels =", lr_image.shape[2])
 
     all_intensity_values = np.concatenate(all_intensity_values)
 
@@ -28,7 +28,7 @@ def compute_global_metrics(lr_files, hr_files):
     global_mean = np.mean(all_intensity_values, axis=0)
     global_median = np.median(all_intensity_values, axis=0)
     global_std = np.std(all_intensity_values, axis=0)
-    print("shape of all mean, std, min, max, median:", global_mean.shape, global_std.shape, global_min.shape, global_max.shape, global_median.shape)
+    #print("shape of all mean, std, min, max, median:", global_mean.shape, global_std.shape, global_min.shape, global_max.shape, global_median.shape)
 
     return all_intensity_values, global_min, global_max, global_mean, global_median, global_std
 
@@ -51,22 +51,90 @@ def extract_patches(image, patch_size, stride=16):
         for j in range(0, img_w - patch_w + 1, stride):
             patch = image[i:i + patch_h, j:j + patch_w, :]  
             patches.append(patch)
+    print(f'Extracted {len(patches)} patches of size {patch_size} from image of size {(img_h, img_w)} with stride {stride}.')
     return np.array(patches)
 
-def load_data_with_patches(data_path, patch_size, BAND, global_mean=None, global_std=None):
+def load_data_with_patches(data_path, patch_size, BAND, global_mean=None, global_std=None,plot_images=False):
     lr_data, hr_data, global_mean, global_std = load_normalise_data(data_path, BAND, global_mean, global_std)
 
     lr_patches = []
     hr_patches = []
     print(f'LR Data Shape: {lr_data.shape}' )
     print(f'HR Data Shape: {hr_data.shape}')
-
+    if plot_images == True:
+        to_plot = []
+        sm = 0
     for lr_img, hr_img in zip(lr_data, hr_data):
+        print(lr_img.shape, hr_img.shape)#H,W,C
+        if plot_images:
+            sm = sm + hr_img
+            bands = [30, 50, 70]
+            img1 = lr_img[:, :, bands]
+            img1_vmin, img1_vmax = img1.min(), img1.max()
+            img1 = (img1 - img1_vmin) / (img1_vmax - img1_vmin) if img1_vmax != img1_vmin else img1
+            to_plot.append(img1)
+            img2 = hr_img[:, :, bands]
+            img2_vmin, img2_vmax = img2.min(), img2.max()
+            img2 = (img2 - img2_vmin) / (img2_vmax - img2_vmin) if img2_vmax != img2_vmin else img2
+            """fig, axes = plt.subplots(1, 2, figsize=(10, 5))
+            axes[0].imshow(img1)
+            axes[0].set_title('LR Image')
+            axes[0].axis('off')
+            axes[1].imshow(img2)
+            axes[1].set_title('HR Image')
+            axes[1].axis('off')
+            plt.show()"""
         lr_img_patches = extract_patches(lr_img, patch_size)  # lr_img (spectral bands, H, W)
         hr_img_patches = extract_patches(hr_img, (patch_size[0] * 4, patch_size[1] * 4), stride=64)
         lr_patches.extend(lr_img_patches)
         hr_patches.extend(hr_img_patches)
-
+    if plot_images == True:
+        nb = len(to_plot)
+        print(f'Number of (non patched) images in the dataset: {nb}')
+        H = int(torch.sqrt(torch.tensor(nb)).item())
+        W = (nb)//H + (1 if (nb)%H !=0 else 0)
+        if H !=1 and W !=1:
+            fig, axes = plt.subplots(H, W, figsize=(15, 15))
+            for i in range(H):
+                for j in range(W):
+                    idx = i * W + j
+                    if idx < nb:
+                        axes[i, j].imshow(to_plot[idx])
+                        axes[i, j].set_title(f'Image {idx+1}')
+                        axes[i, j].axis('off')
+                    else:
+                        axes[i, j].axis('off')
+            plt.show()
+        else:
+            fig, ax = plt.subplots(nb, 1, figsize=(5, 5 * nb))
+            for i in range(nb):
+                ax[i].imshow(to_plot[i])
+                ax[i].set_title(f'Image {i+1}')
+                ax[i].axis('off')
+            plt.show()
+    if plot_images:
+        sm = sm / len(lr_data)
+        #sm is of shape H,W,C
+        #mean sm so that mean is of shape W,C
+        mean_sm = sm.mean(axis=0)
+        plt.figure(figsize=(10, 5))
+        plt.imshow(mean_sm.T, cmap='gray')
+        plt.title('Mean of HR Images across Height Dimension, depending of channel')
+        #plt.axis('off')
+        plt.xlabel('Width')
+        plt.ylabel('Spectral Channels')
+        plt.show()
+        #compute the mean over the width dimension so mean_mean is of shape C
+        mean_mean = mean_sm.mean(axis=0)
+        #devide mean_sm by mean_mean to have the relative variation along the height
+        mean_sm = mean_sm / mean_mean
+        plt.figure(figsize=(10, 5))
+        plt.imshow(mean_sm.T, cmap='gray')
+        plt.title('Relative Variation of Mean HR Image across Height Dimension, depending of channel')
+        #plt.axis('off')
+        plt.xlabel('Width')
+        plt.ylabel('Spectral Channels')
+        plt.show()
     lr_patches = np.array(lr_patches)
     hr_patches = np.array(hr_patches)
 
@@ -96,7 +164,7 @@ def load_normalise_data(data_dir, BAND, global_mean=None, global_std=None):
 
         #plot_global_histogram(all_intensity_values, global_min, global_max, global_mean, global_median, global_std)
         """    
-    print(f"Using Global Mean: {global_mean}, Global Std: {global_std}")
+    #print(f"Using Global Mean: {global_mean}, Global Std: {global_std}")
 
     lr_data = []
     hr_data = []
