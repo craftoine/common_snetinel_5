@@ -163,3 +163,71 @@ class depth_separable_Unet(nn.Module):
         output = x + interpolated
         output = output * self.std + self.mean
         return output
+
+def unet_1M_x2(num_spectral_bands,upsample_scale=2, mean=torch.tensor(0.0), std=torch.tensor(1.0),full_bn=False):
+    return depth_separable_Unet(num_spectral_bands,
+        block_n_layers = 2,
+        block_multiplier = 0.6,
+        n_levels = 4,
+        upsample_scale=upsample_scale,
+        bias=True,
+        depth_multiplier=1,
+        compression="no",
+        bn_conv = full_bn,
+        bn_block = full_bn,
+        level_scale=2,
+        last_biais= True,
+        mean=mean,
+        std=std
+    )
+     
+def unet_1M_x4(num_spectral_bands,upsample_scale=2, mean=torch.tensor(0.0), std=torch.tensor(1.0),full_bn=False):
+    return depth_separable_Unet(num_spectral_bands,
+        block_n_layers = 2,
+        block_multiplier = 0.6,
+        n_levels = 4,
+        upsample_scale=upsample_scale,
+        bias=True,
+        depth_multiplier=1,
+        compression="no",
+        bn_conv = full_bn,
+        bn_block = full_bn,
+        level_scale=4,
+        last_biais= True,
+        mean=mean,
+        std=std
+    )
+
+def unet_800k_x2(num_spectral_bands,upsample_scale=2, mean=torch.tensor(0.0), std=torch.tensor(1.0),full_bn=False):
+    return depth_separable_Unet(num_spectral_bands,
+        block_n_layers = 3,
+        block_multiplier = 0.5,
+        n_levels = 3,
+        upsample_scale=upsample_scale,
+        bias=True,
+        depth_multiplier=1,
+        compression="no",
+        bn_conv = full_bn,
+        bn_block = full_bn,
+        level_scale=2,
+        last_biais= True,
+        mean=mean,
+        std=std
+    )
+     
+def unet_800k_x4(num_spectral_bands,upsample_scale=2, mean=torch.tensor(0.0), std=torch.tensor(1.0),full_bn=False):
+    return depth_separable_Unet(num_spectral_bands,
+        block_n_layers = 3,
+        block_multiplier = 0.5,
+        n_levels = 3,
+        upsample_scale=upsample_scale,
+        bias=True,
+        depth_multiplier=1,
+        compression="no",
+        bn_conv = full_bn,
+        bn_block = full_bn,
+        level_scale=4,
+        last_biais= True,
+        mean=mean,
+        std=std
+    )
