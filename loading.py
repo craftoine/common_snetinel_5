@@ -54,7 +54,8 @@ def extract_patches(image, patch_size, stride=16):
     print(f'Extracted {len(patches)} patches of size {patch_size} from image of size {(img_h, img_w)} with stride {stride}.')
     return np.array(patches)
 
-def load_data_with_patches(data_path, patch_size, BAND, global_mean=None, global_std=None,plot_images=False):
+def load_data_with_patches(data_path, patch_size, BAND, global_mean=None, global_std=None,plot_images=False, mode = "lr-hr"):
+    assert mode in ["lr-hr", "hs-sr"], "Mode must be either 'lr-hr' or 'hs-sr'"
     lr_data, hr_data, global_mean, global_std = load_normalise_data(data_path, BAND, global_mean, global_std)
 
     lr_patches = []
@@ -84,8 +85,13 @@ def load_data_with_patches(data_path, patch_size, BAND, global_mean=None, global
             axes[1].set_title('HR Image')
             axes[1].axis('off')
             plt.show()"""
-        lr_img_patches = extract_patches(lr_img, patch_size)  # lr_img (spectral bands, H, W)
-        hr_img_patches = extract_patches(hr_img, (patch_size[0] * 4, patch_size[1] * 4), stride=64)
+        if mode == "lr-hr":
+            lr_img_patches = extract_patches(lr_img, patch_size)  # lr_img (spectral bands, H, W)
+            hr_img_patches = extract_patches(hr_img, (patch_size[0] * 4, patch_size[1] * 4), stride=64)
+        elif mode == "hs-sr":
+            hr_img_patches = extract_patches(hr_img, patch_size)  # hr_img (spectral bands, H, W)
+            #cole batch size frome hr to create empty lr patches
+            lr_img_patches = np.zeros((hr_img_patches.shape[0], patch_size[0] // 4, patch_size[1] // 4, hr_img_patches.shape[3]))
         lr_patches.extend(lr_img_patches)
         hr_patches.extend(hr_img_patches)
     if plot_images == True:
