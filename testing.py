@@ -131,6 +131,17 @@ def calculate_lpips_bandwise(sr, hr, loss_fn_gpu, device):
     return np.mean(lpips_bandwise)
 
 
+def gradient_energy(img):
+    if img.dim() == 3:
+        img = img.unsqueeze(0)
+
+    gx = img[:, :, :, 1:] - img[:, :, :, :-1]
+    gy = img[:, :, 1:, :] - img[:, :, :-1, :]
+    grad_energy = (gx.abs().mean() + gy.abs().mean()) / 2.0
+    return grad_energy.item()
+
+
+
 def plot_hyperspectral_images_false_color_global2(lr_img, hr_img, pred_img, idx,network_name,save_dir, bands=[30, 50, 70], cmap='terrain', vmin=None, vmax=None): 
 
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
@@ -289,7 +300,109 @@ def metric_s5net(model, test_loader, device, network_name,loss_fn_lpips_gpu,save
     return avg_psnr, avg_scc,  avg_ssim, avg_lpips, lr_images, hr_images, sr_images
 
 
-def S5_DSCR_S_test(params,test_loader,device,num_bands,loss_fn_lpips_gpu,csv_file, correct_relu = True, same_kernel = False,bias=False,plot_hyper = True,compression="no",last_conv = False,mean=torch.tensor(0.0), std=torch.tensor(1.0)):
+def safe_reshape_for_pca(img):
+    reshaped = img.reshape(img.shape[0], -1).T.astype(np.float32)
+    reshaped = np.nan_to_num(reshaped, nan=0.0, posinf=0.0, neginf=0.0)
+    return reshaped
+
+def plot_hyperspectral_shr_global(hr_img, a_shr_img, shr_img, idx, network_name, bands=[30, 50, 70], cmap='terrain'):
+    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+
+    hr_color = hr_img[bands, :, :].transpose(1, 2, 0)
+    a_shr_color = a_shr_img[bands, :, :].transpose(1, 2, 0)
+    shr_color = shr_img[bands, :, :].transpose(1, 2, 0)
+
+    all_images = np.concatenate([hr_color.flatten(), a_shr_color.flatten(), shr_color.flatten()])
+    global_min, global_max = all_images.min(), all_images.max()
+
+    def normalize(img): 
+        return (img - global_min) / (global_max - global_min + 1e-8)
+
+    hr_color, a_shr_color, shr_color = normalize(hr_color), normalize(a_shr_color), normalize(shr_color)
+
+    axes[0].imshow(hr_color, cmap=cmap);  axes[0].set_title("HR "); axes[0].axis('off')
+    axes[1].imshow(a_shr_color, cmap=cmap); axes[1].set_title("A(SHR) "); axes[1].axis('off')
+    axes[2].imshow(shr_color, cmap=cmap); axes[2].set_title("SHR"); axes[2].axis('off')
+
+    plt.tight_layout()
+    #output_path = f"{save_dir}/{network_name}_SHR_{idx}.png"
+    #plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    #plt.close(fig)
+    plt.show()
+
+def metric_selfsupervised_shr(
+    model,
+    args,
+    test_loader,
+    physics,
+    network_name,
+    csv_filename=None,
+    plot_hyper=True,
+    bicubic_model=None,
+    save_dir="."
+):
+    device = args.device
+    model.eval()
+    recon_psnr, sharpness_gain = [], []
+
+    with torch.no_grad():
+        for idx, (_, hr) in enumerate(test_loader.loader):  
+            hr = hr.to(device)
+            shr = torch.relu(model(hr))
+            a_shr = physics.A(shr)
+
+            # Measurement consistency
+            psnr_val = psnr_gpu(a_shr, hr, device, data_range=1).item()
+            recon_psnr.append(psnr_val)
+
+            # Sharpness gain
+            sharp_hr = gradient_energy(hr[0])
+            sharp_shr = gradient_energy(shr[0])
+            sharpness_gain.append(sharp_shr / (sharp_hr + 1e-8))
+
+            if plot_hyper:
+                hr_np = hr[0].cpu().numpy()
+                a_shr_np = a_shr[0].cpu().numpy()
+                shr_np = shr[0].cpu().numpy()
+                bicubic_out = bicubic_model(hr.cpu())
+                bicubic_np = bicubic_out[0].cpu().numpy()
+
+                # --- PCA false color ---
+                hr_reshaped = safe_reshape_for_pca(hr_np)
+                pca = PCA(n_components=3)
+                pca.fit(hr_reshaped)
+
+                hr_pca = pca.transform(hr_reshaped).T.reshape(3, hr_np.shape[1], hr_np.shape[2])
+                a_shr_pca = pca.transform(safe_reshape_for_pca(a_shr_np)).T.reshape(3, a_shr_np.shape[1], a_shr_np.shape[2])
+                shr_pca = pca.transform(safe_reshape_for_pca(shr_np)).T.reshape(3, shr_np.shape[1], shr_np.shape[2])
+                bicubic_pca = pca.transform(safe_reshape_for_pca(bicubic_np)).T.reshape(3, bicubic_np.shape[1], bicubic_np.shape[2])
+
+                #plot_hyperspectral_shr_global( hr_pca, a_shr_pca, shr_pca, idx, network_name, bicubic_img=bicubic_pca, save_dir=save_dir, bands=[0, 1, 2] )
+                plot_hyperspectral_shr_global( hr_pca, a_shr_pca, shr_pca, idx, network_name, bicubic_img=bicubic_pca, save_dir=save_dir, bands=[1, 0, 2] )
+
+    
+    avg_psnr = np.mean(recon_psnr)
+    avg_sharp = np.mean(sharpness_gain)
+
+    print(f"Measurement Consistency: {avg_psnr:.4f}")
+    print(f"Sharpness Gain: {avg_sharp:.4f}")
+
+    if csv_filename:
+        file_exists = os.path.isfile(csv_filename)
+        with open(csv_filename, 'a', newline='') as csvfile:
+            writer = csv.writer(csvfile)
+            if not file_exists:
+                writer.writerow(["Network", "Measurement Consistency", "Sharpness Gain"])
+            writer.writerow([network_name, round(avg_psnr, 4), round(avg_sharp, 4)])
+
+    return avg_psnr, avg_sharp
+
+
+
+
+
+def S5_DSCR_S_test(args,test_loader,num_bands,loss_fn_lpips_gpu,csv_file, correct_relu = True, same_kernel = False,bias=False,plot_hyper = True,compression="no",last_conv = False,mean=torch.tensor(0.0), std=torch.tensor(1.0)):
+    device = args.device
     model = S5_DSCR_S(in_channels=num_bands, 
                             out_channels=num_bands,
                             num_spectral_bands=num_bands, 
@@ -304,14 +417,15 @@ def S5_DSCR_S_test(params,test_loader,device,num_bands,loss_fn_lpips_gpu,csv_fil
                             mean=mean,
                             std=std).to(device)
 
-    model.load_state_dict(torch.load(os.path.join(params.save_dir, f"{params.save_prefix}_DSC2_updated_hyperspectral_model.pth")))
+    model.load_state_dict(torch.load(os.path.join(args.save_dir, f"{args.save_prefix}_DSC2_updated_hyperspectral_model.pth")))
 
-    """avg_psnr, avg_scc, avg_ssim, avg_lpips, lr_images, hr_images, sr_images = metric_s5net(model, test_loader, device, 'S5_DSCR_S',loss_fn_lpips_gpu,params.save_dir,csv_file, plot_hyper=plot_hyper)
+    """avg_psnr, avg_scc, avg_ssim, avg_lpips, lr_images, hr_images, sr_images = metric_s5net(model, test_loader, device, 'S5_DSCR_S',loss_fn_lpips_gpu,args.save_dir,csv_file, plot_hyper=plot_hyper)
     return lr_images, hr_images, sr_images"""
-    return generic_testing(model,test_loader,device,'S5_DSCR_S',loss_fn_lpips_gpu,csv_file,params,plot_hyper)
+    return generic_testing(model,test_loader,'S5_DSCR_S',loss_fn_lpips_gpu,csv_file,args,plot_hyper)
 
 
-def S5_DSCR_S_test_on_train_set(params,train_loader,device,num_bands,loss_fn_lpips_gpu,csv_file, correct_relu = True, same_kernel = False,bias=False,plot_hyper = True,compression="no",last_conv = False,mean=torch.tensor(0.0), std=torch.tensor(1.0)):
+def S5_DSCR_S_test_on_train_set(args,train_loader,num_bands,loss_fn_lpips_gpu,csv_file, correct_relu = True, same_kernel = False,bias=False,plot_hyper = True,compression="no",last_conv = False,mean=torch.tensor(0.0), std=torch.tensor(1.0)):
+    device = args.device
     model = S5_DSCR_S(in_channels=num_bands, 
                             out_channels=num_bands, 
                             num_spectral_bands=num_bands, 
@@ -327,12 +441,13 @@ def S5_DSCR_S_test_on_train_set(params,train_loader,device,num_bands,loss_fn_lpi
                             std=std
                             ).to(device)
 
-    model.load_state_dict(torch.load(os.path.join(params.save_dir, f"{params.save_prefix}_DSC2_updated_hyperspectral_model.pth")))
+    model.load_state_dict(torch.load(os.path.join(args.save_dir, f"{args.save_prefix}_DSC2_updated_hyperspectral_model.pth")))
 
-    """avg_psnr, avg_scc, avg_ssim, avg_lpips, lr_images, hr_images, sr_images = metric_s5net(model, train_loader, device, 'S5_DSCR_S',loss_fn_lpips_gpu,params.save_dir,csv_file, plot_hyper=plot_hyper)
+    """avg_psnr, avg_scc, avg_ssim, avg_lpips, lr_images, hr_images, sr_images = metric_s5net(model, train_loader, device, 'S5_DSCR_S',loss_fn_lpips_gpu,args.save_dir,csv_file, plot_hyper=plot_hyper)
     return lr_images, hr_images, sr_images"""
-    return generic_testing(model,train_loader,device,'S5_DSCR_S_on_train_set',loss_fn_lpips_gpu,csv_file,params,plot_hyper)
-def S5_DSCR_S_test_on_val_set(params,valid_loader,device,num_bands,loss_fn_lpips_gpu,csv_file, correct_relu = True, same_kernel = False,bias=False,plot_hyper = True,compression="no",last_conv = False,mean=torch.tensor(0.0), std=torch.tensor(1.0)):
+    return generic_testing(model,train_loader,'S5_DSCR_S_on_train_set',loss_fn_lpips_gpu,csv_file,args,plot_hyper)
+def S5_DSCR_S_test_on_val_set(args,valid_loader,num_bands,loss_fn_lpips_gpu,csv_file, correct_relu = True, same_kernel = False,bias=False,plot_hyper = True,compression="no",last_conv = False,mean=torch.tensor(0.0), std=torch.tensor(1.0)):
+    device = args.device
     model = S5_DSCR_S(in_channels=num_bands, 
                             out_channels=num_bands, 
                             num_spectral_bands=num_bands, 
@@ -348,12 +463,13 @@ def S5_DSCR_S_test_on_val_set(params,valid_loader,device,num_bands,loss_fn_lpips
                             std=std
                             ).to(device)
 
-    model.load_state_dict(torch.load(os.path.join(params.save_dir, f"{params.save_prefix}_DSC2_updated_hyperspectral_model.pth")))
+    model.load_state_dict(torch.load(os.path.join(args.save_dir, f"{args.save_prefix}_DSC2_updated_hyperspectral_model.pth")))
 
-    """avg_psnr, avg_scc, avg_ssim, avg_lpips, lr_images, hr_images, sr_images = metric_s5net(model, valid_loader, device, 'S5_DSCR_S',loss_fn_lpips_gpu,params.save_dir,csv_file, plot_hyper=plot_hyper)
+    """avg_psnr, avg_scc, avg_ssim, avg_lpips, lr_images, hr_images, sr_images = metric_s5net(model, valid_loader, device, 'S5_DSCR_S',loss_fn_lpips_gpu,args.save_dir,csv_file, plot_hyper=plot_hyper)
     return lr_images, hr_images, sr_images"""
-    return generic_testing(model,valid_loader,device,'S5_DSCR_S',loss_fn_lpips_gpu,csv_file,params,plot_hyper)
-def S5_DSCR_test(params,test_loader,device,num_bands,loss_fn_lpips_gpu,csv_file, correct_relu = True, same_kernel = False,bias=False,plot_hyper = True,compression="no",last_conv = False,mean=torch.tensor(0.0), std=torch.tensor(1.0)):
+    return generic_testing(model,valid_loader,'S5_DSCR_S',loss_fn_lpips_gpu,csv_file,args,plot_hyper)
+def S5_DSCR_test(args,test_loader,num_bands,loss_fn_lpips_gpu,csv_file, correct_relu = True, same_kernel = False,bias=False,plot_hyper = True,compression="no",last_conv = False,mean=torch.tensor(0.0), std=torch.tensor(1.0)):
+    device = args.device
     model = S5_DSCR(
         in_channels=num_bands,
         out_channels=num_bands,
@@ -371,11 +487,12 @@ def S5_DSCR_test(params,test_loader,device,num_bands,loss_fn_lpips_gpu,csv_file,
         std=std
     ).to(device)
 
-    model.load_state_dict(torch.load(os.path.join(params.save_dir, f"{params.save_prefix}_DSC_residual2_updated_hyperspectral_model.pth")))
-    """avg_psnr, avg_scc, avg_ssim, avg_lpips, lr_images, hr_images, sr_images = metric_s5net(model, test_loader, device,'S5_DSCR',loss_fn_lpips_gpu,params.save_dir,csv_file, plot_hyper=plot_hyper)
+    model.load_state_dict(torch.load(os.path.join(args.save_dir, f"{args.save_prefix}_DSC_residual2_updated_hyperspectral_model.pth")))
+    """avg_psnr, avg_scc, avg_ssim, avg_lpips, lr_images, hr_images, sr_images = metric_s5net(model, test_loader, device,'S5_DSCR',loss_fn_lpips_gpu,args.save_dir,csv_file, plot_hyper=plot_hyper)
     return lr_images, hr_images, sr_images"""
-    return generic_testing(model,test_loader,device,'S5_DSCR',loss_fn_lpips_gpu,csv_file,params,plot_hyper)
-def S5_DSCR_test_on_train_set(params,train_loader,device,num_bands,loss_fn_lpips_gpu,csv_file, correct_relu = True, same_kernel = False,bias=False,plot_hyper = True,compression="no",last_conv = False,mean=torch.tensor(0.0), std=torch.tensor(1.0)):
+    return generic_testing(model,test_loader,'S5_DSCR',loss_fn_lpips_gpu,csv_file,args,plot_hyper)
+def S5_DSCR_test_on_train_set(args,train_loader,num_bands,loss_fn_lpips_gpu,csv_file, correct_relu = True, same_kernel = False,bias=False,plot_hyper = True,compression="no",last_conv = False,mean=torch.tensor(0.0), std=torch.tensor(1.0)):
+    device = args.device
     model = S5_DSCR(
         in_channels=num_bands,
         out_channels=num_bands,
@@ -393,11 +510,12 @@ def S5_DSCR_test_on_train_set(params,train_loader,device,num_bands,loss_fn_lpips
         std=std
     ).to(device)
 
-    model.load_state_dict(torch.load(os.path.join(params.save_dir, f"{params.save_prefix}_DSC_residual2_updated_hyperspectral_model.pth")))
-    """avg_psnr, avg_scc, avg_ssim, avg_lpips, lr_images, hr_images, sr_images = metric_s5net(model, train_loader, device,'S5_DSCR_on_train_set',loss_fn_lpips_gpu,params.save_dir,csv_file, plot_hyper=plot_hyper)
+    model.load_state_dict(torch.load(os.path.join(args.save_dir, f"{args.save_prefix}_DSC_residual2_updated_hyperspectral_model.pth")))
+    """avg_psnr, avg_scc, avg_ssim, avg_lpips, lr_images, hr_images, sr_images = metric_s5net(model, train_loader, device,'S5_DSCR_on_train_set',loss_fn_lpips_gpu,args.save_dir,csv_file, plot_hyper=plot_hyper)
     return lr_images, hr_images, sr_images"""
-    return generic_testing(model,train_loader,device,'S5_DSCR_on_train_set',loss_fn_lpips_gpu,csv_file,params,plot_hyper)
-def S5_DSCR_test_on_val_set(params,valid_loader,device,num_bands,loss_fn_lpips_gpu,csv_file, correct_relu = True, same_kernel = False,bias=False,plot_hyper = True,compression="no",last_conv = False,mean=torch.tensor(0.0), std=torch.tensor(1.0)):
+    return generic_testing(model,train_loader,'S5_DSCR_on_train_set',loss_fn_lpips_gpu,csv_file,args,plot_hyper)
+def S5_DSCR_test_on_val_set(args,valid_loader,num_bands,loss_fn_lpips_gpu,csv_file, correct_relu = True, same_kernel = False,bias=False,plot_hyper = True,compression="no",last_conv = False,mean=torch.tensor(0.0), std=torch.tensor(1.0)):
+    device = args.device
     model = S5_DSCR(
         in_channels=num_bands,
         out_channels=num_bands,
@@ -415,13 +533,14 @@ def S5_DSCR_test_on_val_set(params,valid_loader,device,num_bands,loss_fn_lpips_g
         std=std
     ).to(device)
     
-    model.load_state_dict(torch.load(os.path.join(params.save_dir, f"{params.save_prefix}_DSC_residual2_updated_hyperspectral_model.pth")))
+    model.load_state_dict(torch.load(os.path.join(args.save_dir, f"{args.save_prefix}_DSC_residual2_updated_hyperspectral_model.pth")))
 
-    """avg_psnr, avg_scc, avg_ssim, avg_lpips, lr_images, hr_images, sr_images = metric_s5net(model, valid_loader, device, 'S5_DSCR_on_val_set',loss_fn_lpips_gpu,params.save_dir,csv_file, plot_hyper=plot_hyper)
+    """avg_psnr, avg_scc, avg_ssim, avg_lpips, lr_images, hr_images, sr_images = metric_s5net(model, valid_loader, device, 'S5_DSCR_on_val_set',loss_fn_lpips_gpu,args.save_dir,csv_file, plot_hyper=plot_hyper)
     return lr_images, hr_images, sr_images"""
-    return generic_testing(model,valid_loader,device,'S5_DSCR_on_val_set',loss_fn_lpips_gpu,csv_file,params,plot_hyper)
+    return generic_testing(model,valid_loader,'S5_DSCR_on_val_set',loss_fn_lpips_gpu,csv_file,args,plot_hyper)
 
-def bicubic_upsample_test(params,test_loader,device,loss_fn_lpips_gpu,csv_file,plot_hyper = True):
+def bicubic_upsample_test(args,test_loader,loss_fn_lpips_gpu,csv_file,plot_hyper = True):
+    device = args.device
     class BicubicUpsample(nn.Module):
         def __init__(self, scale_factor=4,mean=torch.tensor(0.0),std=torch.tensor(1.0)):
             super(BicubicUpsample, self).__init__()
@@ -436,10 +555,11 @@ def bicubic_upsample_test(params,test_loader,device,loss_fn_lpips_gpu,csv_file,p
             return x
 
     model = BicubicUpsample(scale_factor=4,mean=test_loader.mean,std=test_loader.std).to(device)
-    """avg_psnr, avg_scc, avg_ssim, avg_lpips, lr_images, hr_images, sr_images = metric_s5net(model, test_loader, device, 'Bicubic_Upsample',loss_fn_lpips_gpu,params.save_dir,csv_file, plot_hyper=plot_hyper)
+    """avg_psnr, avg_scc, avg_ssim, avg_lpips, lr_images, hr_images, sr_images = metric_s5net(model, test_loader, device, 'Bicubic_Upsample',loss_fn_lpips_gpu,args.save_dir,csv_file, plot_hyper=plot_hyper)
     return lr_images, hr_images, sr_images"""
-    return generic_testing(model,test_loader,device,'Bicubic_Upsample',loss_fn_lpips_gpu,csv_file,params,plot_hyper)
-def bicubic_upsample_test_on_train_set(params,train_loader,device,loss_fn_lpips_gpu,csv_file,plot_hyper = True):
+    return generic_testing(model,test_loader,'Bicubic_Upsample',loss_fn_lpips_gpu,csv_file,args,plot_hyper)
+def bicubic_upsample_test_on_train_set(args,train_loader,loss_fn_lpips_gpu,csv_file,plot_hyper = True):
+    device = args.device
     class BicubicUpsample(nn.Module):
         def __init__(self, scale_factor=4,mean=torch.tensor(0.0),std=torch.tensor(1.0)):
             super(BicubicUpsample, self).__init__()
@@ -454,10 +574,11 @@ def bicubic_upsample_test_on_train_set(params,train_loader,device,loss_fn_lpips_
             return x
 
     model = BicubicUpsample(scale_factor=4,mean=train_loader.mean,std=train_loader.std).to(device)
-    """avg_psnr, avg_scc, avg_ssim, avg_lpips, lr_images, hr_images, sr_images = metric_s5net(model, train_loader, device, 'Bicubic_Upsample_on_train_set',loss_fn_lpips_gpu,params.save_dir,csv_file, plot_hyper=plot_hyper)
+    """avg_psnr, avg_scc, avg_ssim, avg_lpips, lr_images, hr_images, sr_images = metric_s5net(model, train_loader, device, 'Bicubic_Upsample_on_train_set',loss_fn_lpips_gpu,args.save_dir,csv_file, plot_hyper=plot_hyper)
     return lr_images, hr_images, sr_images"""
-    return generic_testing(model,train_loader,device,'Bicubic_Upsample_on_train_set',loss_fn_lpips_gpu,csv_file,params,plot_hyper)
-def bicubic_upsample_test_on_val_set(params,valid_loader,device,loss_fn_lpips_gpu,csv_file,plot_hyper = True):
+    return generic_testing(model,train_loader,'Bicubic_Upsample_on_train_set',loss_fn_lpips_gpu,csv_file,args,plot_hyper)
+def bicubic_upsample_test_on_val_set(args,valid_loader,loss_fn_lpips_gpu,csv_file,plot_hyper = True):
+    device = args.device
     class BicubicUpsample(nn.Module):
         def __init__(self, scale_factor=4,mean=torch.tensor(0.0),std=torch.tensor(1.0)):
             super(BicubicUpsample, self).__init__()
@@ -472,19 +593,34 @@ def bicubic_upsample_test_on_val_set(params,valid_loader,device,loss_fn_lpips_gp
             return x
 
     model = BicubicUpsample(scale_factor=4,mean=valid_loader.mean,std=valid_loader.std).to(device)
-    """avg_psnr, avg_scc, avg_ssim, avg_lpips, lr_images, hr_images, sr_images = metric_s5net(model, valid_loader, device, 'Bicubic_Upsample_on_val_set',loss_fn_lpips_gpu,params.save_dir,csv_file, plot_hyper=plot_hyper)
+    """avg_psnr, avg_scc, avg_ssim, avg_lpips, lr_images, hr_images, sr_images = metric_s5net(model, valid_loader, device, 'Bicubic_Upsample_on_val_set',loss_fn_lpips_gpu,args.save_dir,csv_file, plot_hyper=plot_hyper)
     return lr_images, hr_images, sr_images"""
-    return generic_testing(model,valid_loader,device,'Bicubic_Upsample_on_val_set',loss_fn_lpips_gpu,csv_file,params,plot_hyper)
+    return generic_testing(model,valid_loader,'Bicubic_Upsample_on_val_set',loss_fn_lpips_gpu,csv_file,args,plot_hyper)
 
-def generic_testing(model,test_loader,device,network_test_name,loss_fn_lpips_gpu,csv_file,params,plot_hyper = True):
-    avg_psnr, avg_scc, avg_ssim, avg_lpips, lr_images, hr_images, sr_images = metric_s5net(model, test_loader, device, network_test_name,loss_fn_lpips_gpu,params.save_dir,csv_file, plot_hyper=plot_hyper)
-    return lr_images, hr_images, sr_images
-def generic_test_on_train_set(model,train_loader,device,network_name,loss_fn_lpips_gpu,csv_file,params,plot_hyper = True):
-    return generic_testing(model,train_loader,device,network_name+'_on_train_set',loss_fn_lpips_gpu,csv_file,params,plot_hyper)
-def generic_test_on_val_set(model,valid_loader,device,network_name,loss_fn_lpips_gpu,csv_file,params,plot_hyper = True):
-    return generic_testing(model,valid_loader,device,network_name+'_on_val_set',loss_fn_lpips_gpu,csv_file,params,plot_hyper)
-def generic_test(model,test_loader,device,network_name,loss_fn_lpips_gpu,csv_file,params,plot_hyper = True):
-    return generic_testing(model,test_loader,device,network_name,loss_fn_lpips_gpu,csv_file,params,plot_hyper)
+def generic_testing(model,test_loader,network_test_name,loss_fn_lpips_gpu,csv_file,args,plot_hyper = True):
+    device = args.device
+    if args.mode == "lr-hr":
+        avg_psnr, avg_scc, avg_ssim, avg_lpips, lr_images, hr_images, sr_images = metric_s5net(model, test_loader, device, network_test_name,loss_fn_lpips_gpu,args.save_dir,csv_file, plot_hyper=plot_hyper)
+        return lr_images, hr_images, sr_images
+    elif args.mode == "hr-sr":
+        avg_psnr, avg_sharp = metric_selfsupervised_shr(
+            model,
+            args,
+            test_loader,
+            physics=None,
+            network_name=network_test_name,
+            csv_filename=csv_file,
+            plot_hyper=plot_hyper,
+            bicubic_model=None,
+            save_dir=args.save_dir
+        )
+        return avg_psnr, avg_sharp
+def generic_test_on_train_set(model,train_loader,network_name,loss_fn_lpips_gpu,csv_file,args,plot_hyper = True):
+    return generic_testing(model,train_loader,network_name+'_on_train_set',loss_fn_lpips_gpu,csv_file,args,plot_hyper)
+def generic_test_on_val_set(model,valid_loader,network_name,loss_fn_lpips_gpu,csv_file,args,plot_hyper = True):
+    return generic_testing(model,valid_loader,network_name+'_on_val_set',loss_fn_lpips_gpu,csv_file,args,plot_hyper)
+def generic_test(model,test_loader,network_name,loss_fn_lpips_gpu,csv_file,args,plot_hyper = True):
+    return generic_testing(model,test_loader,network_name,loss_fn_lpips_gpu,csv_file,args,plot_hyper)
 
 #plot Custom_point_wise_conv weight matrices from ther trained model
 def plot_custom_point_wise_conv_weights(model, history=""):
