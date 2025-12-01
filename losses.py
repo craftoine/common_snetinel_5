@@ -243,12 +243,6 @@ class R2REILoss(Module):
 
 
 
-
-
-
-
-
-
 def mc_div(y1, y, model, physics, multiple_factor, tau, margin=0):
     y = y.view(1,y.shape[0],y.shape[1],y.shape[2],y.shape[3])
     y = y.repeat(multiple_factor,1,1,1,1)
@@ -369,16 +363,22 @@ class SureGaussianLoss(nn.Module):
                 div_fn = mc_div_correlated   
             else:  
                 div_fn = mc_div             
+            if self.sigma2 !=0:
+                div = div_fn(y1, y, model, physics,self.multiple_factor, tau=self.tau, margin=self.margin)
+                div = 2 * self.sigma2 * div
 
-            div = div_fn(y1, y, model, physics,self.multiple_factor, tau=self.tau, margin=self.margin)
-            div = 2 * self.sigma2 * div
+                mse = y1 - y
+                if self.margin != 0:
+                    mse = mse[:, :, self.margin:-self.margin, self.margin:-self.margin]
+                mse = mse.pow(2).mean(axis=(1, 2, 3))
 
-            mse = y1 - y
-            if self.margin != 0:
-                mse = mse[:, :, self.margin:-self.margin, self.margin:-self.margin]
-            mse = mse.pow(2).mean(axis=(1, 2, 3))
-
-            loss_sure = mse + div
+                loss_sure = mse + div
+            else:
+                mse = y1 - y
+                if self.margin != 0:
+                    mse = mse[:, :, self.margin:-self.margin, self.margin:-self.margin]
+                mse = mse.pow(2).mean(axis=(1, 2, 3))
+                loss_sure = mse
             return loss_sure
         else:
             #print("Computing SURE loss in eval mode with gradients enabled.")
@@ -397,7 +397,9 @@ class SureGaussianLoss(nn.Module):
                 div = 2 * self.sigma2 * div
                 loss_sure = mse + div
             return loss_sure,x_net
-           
+
+
+            
 class ClippedMSE(nn.Module):
     def __init__(self):
         super().__init__()
@@ -481,8 +483,10 @@ class ProposedLoss(Module):
 
                 
                 if isinstance(loss_value, torch.Tensor):
+                    #print("loss ", loss_fn.__class__.__name__, loss_value.mean().item())
                     total_loss = total_loss + loss_value#.mean()
                 else:
+
                     assert False
                     total_loss = total_loss + torch.tensor(loss_value, device=y.device, dtype=torch.float32)
 
@@ -521,8 +525,10 @@ class ProposedLoss(Module):
 
             #print("total_loss:", total_loss, "requires_grad:", total_loss.requires_grad)
         return total_loss
-        
-        
+
+
+
+
 
         
 
@@ -570,7 +576,6 @@ class Loss(Module):
         return loss
     
 
-  
 
 
 def get_loss(args, physics):
@@ -578,7 +583,7 @@ def get_loss(args, physics):
     if args.partial_sure:
         if args.sure_margin is not None:
             sure_margin = args.sure_margin
-        elif args.mode == "hr-sr":
+        elif True:
             if args.partial_sure_sr:
                 sure_margin = 2
             else:

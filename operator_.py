@@ -104,12 +104,30 @@ def convolution_spatial_zeropadding_torch(img, psf, padding_size):
 
     else:
         raise ValueError(f"Unsupported image shape: {img.shape}")
-        
+
+def plot_hd_kaiser(Hdnew, psf):
+    import matplotlib.pyplot as plt
+
+    plt.figure(figsize=(10, 4))
+
+    plt.subplot(1, 2, 1)
+    plt.title('Hdnew')
+    plt.imshow(Hdnew.numpy(), cmap='jet')
+    plt.colorbar()
+
+    plt.subplot(1, 2, 2)
+    plt.title('psf with Kaiser Window')
+    plt.imshow(psf.numpy(), cmap='jet')
+    plt.colorbar()
+
+    plt.tight_layout()
+    plt.show()
+
+
 def resize_image_spatial_torch(img, ratio, GNyq_x, GNyq_y, N, beta, use_kaiser=True, target_width_x=None):
     
     Hdnew = generate_gaussian_kernel_torch(N, ratio, GNyq_x, GNyq_y, target_width_x=target_width_x)
     psf = apply_kaiser_window_torch(Hdnew, N, beta) if use_kaiser else Hdnew
-
     padding_size = N // 2
     blurred = convolution_spatial_zeropadding_torch(img, psf, padding_size)
 
@@ -124,8 +142,10 @@ def resize_image_spatial_batch_torch(x, ratio, GNyq_x, GNyq_y, N=41, beta=0.5, u
     padding_size = N // 2
 
     psf = generate_gaussian_kernel_torch(N, ratio, GNyq_x, GNyq_y, target_width_x)
+    #p = psf
     if use_kaiser:
         psf = apply_kaiser_window_torch(psf, N, beta)
+    #plot_hd_kaiser(p, psf)
     #psf = psf.to(x.device)
     #psf = psf.unsqueeze(0).unsqueeze(0)  # shape: (1, 1, N, N)
     psf = psf.to(x.device).to(dtype=x.dtype)
@@ -146,11 +166,11 @@ def resize_image_spatial_batch_torch(x, ratio, GNyq_x, GNyq_y, N=41, beta=0.5, u
 
 
 class Downsampling(LinearPhysics):
-    def __init__(self, rate, antialias, true_adjoint=False, GNyq_x=None, GNyq_y=None):
+    def __init__(self, rate, antialias, GNyq_x=None, GNyq_y=None):
         super().__init__()
         self.rate = rate
         self.antialias = antialias
-        self.true_adjoint = true_adjoint
+        #print("GNyq_x:", GNyq_x, "GNyq_y:", GNyq_y)
         assert GNyq_x is not None and GNyq_y is not None, "GNyq_x and GNyq_y must be provided"
         self.GNyq_x = GNyq_x
         self.GNyq_y = GNyq_y
