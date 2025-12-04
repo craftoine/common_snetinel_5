@@ -168,8 +168,8 @@ def load_data_with_patches(args,data_path, global_mean=None, global_std=None,plo
 
 
 def load_normalise_data(data_dir, BAND, global_mean=None, global_std=None):
-    lr_files = sorted([os.path.join(data_dir, f) for f in os.listdir(data_dir) if f.endswith('_cropped_hyper_LR4.mat') and BAND in f ])
-    hr_files = sorted([os.path.join(data_dir, f) for f in os.listdir(data_dir) if f.endswith('_cropped_hyper.mat') and BAND in f])
+    lr_files = sorted([os.path.join(data_dir, f) for f in os.listdir(data_dir) if f.endswith('_newPipeline_hyper_LR4.mat') and BAND in f ])
+    hr_files = sorted([os.path.join(data_dir, f) for f in os.listdir(data_dir) if f.endswith('_newPipeline_hyper.mat') and BAND in f])
 
     if global_mean is None or global_std is None:
         all_intensity_values, global_min, global_max, global_mean, global_median, global_std = compute_global_metrics(lr_files, hr_files)

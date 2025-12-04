@@ -103,7 +103,7 @@ def generic_train(model,model_name,args,train_loader,valid_loader,num_bands,min_
     writer_tensor = SummaryWriter(log_dir=log_dir)
 
     optimizer = optim.Adam(model.parameters(), lr=args.net_lr)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=3, factor=0.1)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=3, factor=0.1,eps = 0)
 
     train_losses, val_losses = [], []
     min_loss_val = float('inf')
@@ -120,14 +120,15 @@ def generic_train(model,model_name,args,train_loader,valid_loader,num_bands,min_
         mean, std = train_loader.mean, train_loader.std
         for batch_idx, (lr, hr) in enumerate(train_loader.loader):
             print("epoch", epoch+1, "/", args.nepochs, " batch", batch_idx+1, "/", len(train_loader.loader), "lr:", optimizer.param_groups[0]['lr'], "\r", end="")
-            lr, hr = lr.to(device), hr.to(device)
             optimizer.zero_grad()
 
             if mode == "lr-hr":
+                lr, hr = lr.to(device), hr.to(device)
                 max_lr = lr.view(lr.size(0), -1).max(1)[0].view(-1, 1, 1, 1) 
                 loss = loss_fn(x=hr, y=lr, model=model)
                 loss = loss / (max_lr**2)
-            else:  
+            else:
+                hr = hr.to(device)
                 max_hr = hr.view(hr.size(0), -1).max(1)[0].view(-1, 1, 1, 1) 
                 loss = loss_fn(x=None, y=hr, model=model)
                 loss = loss / (max_hr**2)
@@ -143,9 +144,10 @@ def generic_train(model,model_name,args,train_loader,valid_loader,num_bands,min_
         model.eval()
         #with torch.no_grad():
         mean, std = valid_loader.mean, valid_loader.std
-        for lr, hr in valid_loader.loader:
-            lr, hr = lr.to(device), hr.to(device)
+        for batch_idx,(lr, hr) in enumerate(valid_loader.loader):
+            print("epoch", epoch+1, "/", args.nepochs, "Validation batch", batch_idx+1, "/", len(valid_loader.loader), "\r", end="")
             if mode == "lr-hr":
+                lr, hr = lr.to(device), hr.to(device)
                 max_lr = lr.view(lr.size(0), -1).max(1)[0].view(-1, 1, 1, 1) 
                 loss = loss_fn(x=hr, y=lr, model=model)
                 loss = loss / (max_lr**2)
@@ -153,6 +155,7 @@ def generic_train(model,model_name,args,train_loader,valid_loader,num_bands,min_
                     loss2 = loss_fn(x=hr, y=lr, model=model)
                     loss2 = loss2 / (max_lr**2)
             else:  
+                hr = hr.to(device)
                 max_hr = hr.view(hr.size(0), -1).max(1)[0].view(-1, 1, 1, 1) 
                 loss = loss_fn(x=None, y=hr, model=model)
                 loss = loss / (max_hr**2)
