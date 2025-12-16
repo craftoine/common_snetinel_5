@@ -91,22 +91,23 @@ def load_data_with_patches(args,data_path, global_mean=None, global_std=None,plo
             axes[1].set_title('HR Image')
             axes[1].axis('off')
             plt.show()"""
+        sc_factor = args.sc_factor
         if mode == "lr-hr":
             if not(args.no_overlapp_patches):
                 lr_img_patches = extract_patches(lr_img, patch_size)  # lr_img (spectral bands, H, W)
-                hr_img_patches = extract_patches(hr_img, (patch_size[0] * 4, patch_size[1] * 4), stride=64)
+                hr_img_patches = extract_patches(hr_img, (patch_size[0] * sc_factor, patch_size[1] * sc_factor), stride=64)
             else:
                 lr_img_patches = extract_patches(lr_img, patch_size, stride=patch_size[0])  # lr_img (spectral bands, H, W)
-                hr_img_patches = extract_patches(hr_img, (patch_size[0] * 4, patch_size[1] * 4), stride=patch_size[0]*4)
+                hr_img_patches = extract_patches(hr_img, (patch_size[0] * sc_factor, patch_size[1] * sc_factor), stride=patch_size[0]*sc_factor)
         elif mode == "hr-sr":
             if not(args.no_overlapp_patches):
                 hr_img_patches = extract_patches(hr_img, patch_size)  # hr_img (spectral bands, H, W)
                 #cole batch size frome hr to create empty lr patches
-                lr_img_patches = np.zeros((hr_img_patches.shape[0], patch_size[0] // 4, patch_size[1] // 4, hr_img_patches.shape[3]))
+                lr_img_patches = np.zeros((hr_img_patches.shape[0], patch_size[0] // sc_factor, patch_size[1] // sc_factor, hr_img_patches.shape[3]))
             else:
                 hr_img_patches = extract_patches(hr_img, patch_size, stride=patch_size[0])  # hr_img (spectral bands, H, W)
                 #cole batch size frome hr to create empty lr patches
-                lr_img_patches = np.zeros((hr_img_patches.shape[0], patch_size[0] // 4, patch_size[1] // 4, hr_img_patches.shape[3]))
+                lr_img_patches = np.zeros((hr_img_patches.shape[0], patch_size[0] // sc_factor, patch_size[1] // sc_factor, hr_img_patches.shape[3]))
         lr_patches.extend(lr_img_patches)
         hr_patches.extend(hr_img_patches)
     if plot_images == True:
@@ -168,8 +169,8 @@ def load_data_with_patches(args,data_path, global_mean=None, global_std=None,plo
 
 
 def load_normalise_data(data_dir, BAND, global_mean=None, global_std=None):
-    lr_files = sorted([os.path.join(data_dir, f) for f in os.listdir(data_dir) if f.endswith('_newPipeline_hyper_LR4.mat') and BAND in f ])
-    hr_files = sorted([os.path.join(data_dir, f) for f in os.listdir(data_dir) if f.endswith('_newPipeline_hyper.mat') and BAND in f])
+    lr_files = sorted([os.path.join(data_dir, f) for f in os.listdir(data_dir) if f.endswith('CE_newPipeline_hyper_LR4.mat') and BAND in f ])
+    hr_files = sorted([os.path.join(data_dir, f) for f in os.listdir(data_dir) if f.endswith('CE_newPipeline_hyper.mat') and BAND in f])
 
     if global_mean is None or global_std is None:
         all_intensity_values, global_min, global_max, global_mean, global_median, global_std = compute_global_metrics(lr_files, hr_files)

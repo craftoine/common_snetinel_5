@@ -8,7 +8,7 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 import os
 import csv
 import matplotlib.pyplot as plt
-from losses import get_loss
+from losses import get_loss, get_debug_loss, get_debug_loss_similarity
 from operator_ import get_physics
 
 
@@ -94,15 +94,22 @@ def S5_DSCR_train(args,train_loader,valid_loader,num_bands,correct_relu = True, 
     return generic_train(model,model_name,args,train_loader,valid_loader,num_bands,min_val_stopping=min_val_stopping)
 
 
-def generic_train(model,model_name,args,train_loader,valid_loader,num_bands,min_val_stopping=False):
+def generic_train(model,model_name,args,train_loader,valid_loader,num_bands,min_val_stopping=False,debug_loss=True):
     device = args.device
     model = model.to(device)
+    smother = False
     summary(model, input_size=(num_bands, 64, 64))
 
     log_dir = os.path.join(args.save_dir, args.save_prefix, model_name)
     writer_tensor = SummaryWriter(log_dir=log_dir)
-
-    optimizer = optim.Adam(model.parameters(), lr=args.net_lr)
+    if args.net_opt == "Adam":
+        optimizer = optim.Adam(model.parameters(), lr=args.net_lr)
+    elif args.net_opt == "adadelta":
+        optimizer = optim.Adadelta(model.parameters(), lr=args.net_lr)
+    elif args.net_opt == "SGD":
+        optimizer = optim.SGD(model.parameters(), lr=args.net_lr, momentum=0.90)
+    else:
+        raise ValueError(f"Unsupported optimizer: {args.net_opt}, use 'Adam', 'adadelta' or 'SGD'.")
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=3, factor=0.1,eps = 0)
 
     train_losses, val_losses = [], []
@@ -110,8 +117,14 @@ def generic_train(model,model_name,args,train_loader,valid_loader,num_bands,min_
     model_to_save = None
     stopped_epoch = -1
     mode = args.mode
-    physics = get_physics(args, device)
-    loss_fn = get_loss(args=args, physics=physics)  
+    physics = get_physics(args)
+    loss_fn = get_loss(args=args, physics=physics)
+    debug_loss_fn = None
+    if debug_loss:
+        debug_loss_fn = get_debug_loss(args, physics)
+    debug_loss_fn_sim = None
+    if debug_loss:
+        debug_loss_fn_sim = get_debug_loss_similarity(args, physics)
     for epoch in range(args.nepochs):
         #print the epoch number and the learning rate but not returning to the line so next prints will overwrite it
         print("epoch", epoch+1, "/", args.nepochs, " lr:", optimizer.param_groups[0]['lr'], "\r", end="")
@@ -143,6 +156,8 @@ def generic_train(model,model_name,args,train_loader,valid_loader,num_bands,min_
         loss2 = None
         model.eval()
         #with torch.no_grad():
+        debug_loss_val = 0
+        debug_loss_val_sim = 0
         mean, std = valid_loader.mean, valid_loader.std
         for batch_idx,(lr, hr) in enumerate(valid_loader.loader):
             print("epoch", epoch+1, "/", args.nepochs, "Validation batch", batch_idx+1, "/", len(valid_loader.loader), "\r", end="")
@@ -154,6 +169,18 @@ def generic_train(model,model_name,args,train_loader,valid_loader,num_bands,min_
                 if second_val_loss:
                     loss2 = loss_fn(x=hr, y=lr, model=model)
                     loss2 = loss2 / (max_lr**2)
+                if debug_loss:
+                    debug_loss_batch = debug_loss_fn(x=hr, y=lr, model=model)
+                    debug_loss_batch = debug_loss_batch / (max_lr**2)
+                    debug_loss_val += debug_loss_batch.mean().item()
+                    #print(max_lr**2)
+                    debug_loss_batch_sim = debug_loss_fn_sim(x=hr, y=lr, model=model)
+                    debug_loss_batch_sim = debug_loss_batch_sim / (max_lr**2)
+                    debug_loss_val_sim += debug_loss_batch_sim.mean().item()
+                    if smother:
+                        debug_loss_batch = debug_loss_fn(x=hr, y=lr, model=model)
+                        debug_loss_batch = debug_loss_batch / (max_lr**2)
+                        debug_loss_val += debug_loss_batch.mean().item()
             else:  
                 hr = hr.to(device)
                 max_hr = hr.view(hr.size(0), -1).max(1)[0].view(-1, 1, 1, 1) 
@@ -162,6 +189,8 @@ def generic_train(model,model_name,args,train_loader,valid_loader,num_bands,min_
                 if second_val_loss:
                     loss2 = loss_fn(x=None, y=hr, model=model)
                     loss2 = loss2 / (max_hr**2)
+                if debug_loss:
+                    assert False, "Debug loss not existing for hr-sr mode"
             loss = loss.mean()
             val_loss += loss.item()
             if second_val_loss:
@@ -174,10 +203,18 @@ def generic_train(model,model_name,args,train_loader,valid_loader,num_bands,min_
                 stopped_epoch = epoch
         train_losses.append(epoch_loss / len(train_loader.loader))
         val_losses.append(val_loss / len(valid_loader.loader))
+        if smother:
+            debug_loss_val = debug_loss_val/2
         if not second_val_loss:
-            print(f"Epoch {epoch+1}/{args.nepochs}, Train Loss: {train_losses[-1]}, Validation Loss: {val_losses[-1]}")
+            if not debug_loss:
+                print(f"Epoch {epoch+1}/{args.nepochs}, Train Loss: {train_losses[-1]}, Validation Loss: {val_losses[-1]}")
+            else:
+                print(f"Epoch {epoch+1}/{args.nepochs}, Train Loss: {train_losses[-1]}, Validation Loss: {val_losses[-1]}, Debug Loss: {debug_loss_val/len(valid_loader.loader)},debug sim loss: {debug_loss_val_sim/len(valid_loader.loader)}")
         else:
-            print(f"Epoch {epoch+1}/{args.nepochs}, Train Loss: {train_losses[-1]}, Validation Loss: {val_losses[-1]}, Second Validation Loss: {second_val/len(valid_loader.loader)}")
+            if not debug_loss:
+                print(f"Epoch {epoch+1}/{args.nepochs}, Train Loss: {train_losses[-1]}, Validation Loss: {val_losses[-1]}, Second Validation Loss: {second_val/len(valid_loader.loader)}")
+            else:
+                print(f"Epoch {epoch+1}/{args.nepochs}, Train Loss: {train_losses[-1]}, Validation Loss: {val_losses[-1]}, Second Validation Loss: {second_val/len(valid_loader.loader)}, Debug Loss: {debug_loss_val/len(valid_loader.loader)},debug sim loss: {debug_loss_val_sim/len(valid_loader.loader)}")
         writer_tensor.add_scalar('Loss/Train', train_losses[-1], epoch)
         writer_tensor.add_scalar('Loss/Validation', val_losses[-1], epoch)
         scheduler.step(val_losses[-1])

@@ -5,7 +5,7 @@ from scipy.ndimage import sobel
 import torch.nn as nn
 from sklearn.decomposition import PCA
 import os
-from archithectures import S5_DSCR, S5_DSCR_S
+from archithectures import *
 from skimage.metrics import structural_similarity as ssim
 import matplotlib.pyplot as plt
 import csv
@@ -198,11 +198,11 @@ def metric_s5net(model, test_loader, device, network_name,loss_fn_lpips_gpu,save
     ssim_values, lpips_values = [], []
     lr_images, hr_images, sr_images = [], [], []
     ii =0
+    model = model.to(device) 
     with torch.no_grad():
         mean,std = test_loader.mean, test_loader.std
         for lr, hr in test_loader.loader:
-            lr, hr = lr.to(device), hr.to(device)
-            model = model.to(device)  
+            lr, hr = lr.to(device), hr.to(device) 
             output = model(lr)
             output = nn.ReLU()(output)#clip to [0; infinity[
             """max_hr = hr.max().item()
@@ -305,30 +305,66 @@ def safe_reshape_for_pca(img):
     reshaped = np.nan_to_num(reshaped, nan=0.0, posinf=0.0, neginf=0.0)
     return reshaped
 
-def plot_hyperspectral_shr_global(hr_img, a_shr_img, shr_img, idx, network_name, bands=[30, 50, 70], cmap='terrain'):
-    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+def plot_hyperspectral_shr_global(
+            hr_img,
+            a_shr_img,
+            shr_img,
+            idx,
+            network_name,
+            bicubic_img,        
+            save_dir=".",
+            bands=[30, 50, 70],
+            cmap="terrain"
+        ):
 
-    hr_color = hr_img[bands, :, :].transpose(1, 2, 0)
-    a_shr_color = a_shr_img[bands, :, :].transpose(1, 2, 0)
-    shr_color = shr_img[bands, :, :].transpose(1, 2, 0)
+    fig, axes = plt.subplots(1, 4, figsize=(20, 5))
+    
 
-    all_images = np.concatenate([hr_color.flatten(), a_shr_color.flatten(), shr_color.flatten()])
-    global_min, global_max = all_images.min(), all_images.max()
+    hr_color      = hr_img[bands, :, :].transpose(1, 2, 0)
+    a_shr_color   = a_shr_img[bands, :, :].transpose(1, 2, 0)
+    shr_color     = shr_img[bands, :, :].transpose(1, 2, 0)
+    bicubic_color = bicubic_img[bands, :, :].transpose(1, 2, 0)
 
-    def normalize(img): 
-        return (img - global_min) / (global_max - global_min + 1e-8)
 
-    hr_color, a_shr_color, shr_color = normalize(hr_color), normalize(a_shr_color), normalize(shr_color)
+    all_images = np.concatenate([
+        hr_color.flatten(),
+        a_shr_color.flatten(),
+        shr_color.flatten(),
+        bicubic_color.flatten()
+    ])
 
-    axes[0].imshow(hr_color, cmap=cmap);  axes[0].set_title("HR "); axes[0].axis('off')
-    axes[1].imshow(a_shr_color, cmap=cmap); axes[1].set_title("A(SHR) "); axes[1].axis('off')
-    axes[2].imshow(shr_color, cmap=cmap); axes[2].set_title("SHR"); axes[2].axis('off')
+    global_min = all_images.min()
+    global_max = all_images.max()
+
+    hr_norm      = (hr_color      - global_min) / (global_max - global_min)
+    a_shr_norm   = (a_shr_color   - global_min) / (global_max - global_min )
+    shr_norm     = (shr_color     - global_min) / (global_max - global_min )
+    bicubic_norm = (bicubic_color - global_min) / (global_max - global_min )
+
+
+    axes[0].imshow(hr_norm, vmin=0, vmax=1, cmap=cmap)
+    axes[0].set_title(f"HR Image")
+    axes[0].axis("off")
+
+    axes[1].imshow(a_shr_norm, vmin=0, vmax=1, cmap=cmap)
+    axes[1].set_title(f"A(SHR) Image")
+    axes[1].axis("off")
+
+    axes[2].imshow(shr_norm, vmin=0, vmax=1, cmap=cmap)
+    axes[2].set_title(f"SHR Image ")
+    axes[2].axis("off")
+
+    axes[3].imshow(bicubic_norm, vmin=0, vmax=1, cmap=cmap)
+    axes[3].set_title(f"Bicubic Image")
+    axes[3].axis("off")
 
     plt.tight_layout()
-    #output_path = f"{save_dir}/{network_name}_SHR_{idx}.png"
-    #plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    #plt.close(fig)
+    output_path = f"{save_dir}/{network_name}_SHR_{idx}_global.png"
+    # plt.savefig(output_path, format="png", dpi=300, bbox_inches="tight")
+    # print(f"Image saved at: {output_path}")
     plt.show()
+    #plt.close(fig)
+
 
 def metric_selfsupervised_shr(
     model,
@@ -344,7 +380,7 @@ def metric_selfsupervised_shr(
     device = args.device
     model.eval()
     recon_psnr, sharpness_gain = [], []
-
+    model = model.to(device) 
     with torch.no_grad():
         for idx, (_, hr) in enumerate(test_loader.loader):  
             hr = hr.to(device)
@@ -541,58 +577,21 @@ def S5_DSCR_test_on_val_set(args,valid_loader,num_bands,loss_fn_lpips_gpu,csv_fi
 
 def bicubic_upsample_test(args,test_loader,loss_fn_lpips_gpu,csv_file,plot_hyper = True):
     device = args.device
-    class BicubicUpsample(nn.Module):
-        def __init__(self, scale_factor=4,mean=torch.tensor(0.0),std=torch.tensor(1.0)):
-            super(BicubicUpsample, self).__init__()
-            self.upsample = nn.Upsample(scale_factor=scale_factor, mode='bicubic', align_corners=False)
-            self.mean = nn.Parameter(mean, requires_grad=False)
-            self.std = nn.Parameter(std, requires_grad=False)
-
-        def forward(self, x):
-            x = (x - self.mean) / self.std
-            x = self.upsample(x)
-            x = x * self.std + self.mean
-            return x
-
-    model = BicubicUpsample(scale_factor=4,mean=test_loader.mean,std=test_loader.std).to(device)
+    model = BicubicUpsample(scale_factor = args.sc_factor,mean=test_loader.mean,std=test_loader.std).to(device)
     """avg_psnr, avg_scc, avg_ssim, avg_lpips, lr_images, hr_images, sr_images = metric_s5net(model, test_loader, device, 'Bicubic_Upsample',loss_fn_lpips_gpu,args.save_dir,csv_file, plot_hyper=plot_hyper)
     return lr_images, hr_images, sr_images"""
     return generic_testing(model,test_loader,'Bicubic_Upsample',loss_fn_lpips_gpu,csv_file,args,plot_hyper)
 def bicubic_upsample_test_on_train_set(args,train_loader,loss_fn_lpips_gpu,csv_file,plot_hyper = True):
     device = args.device
-    class BicubicUpsample(nn.Module):
-        def __init__(self, scale_factor=4,mean=torch.tensor(0.0),std=torch.tensor(1.0)):
-            super(BicubicUpsample, self).__init__()
-            self.upsample = nn.Upsample(scale_factor=scale_factor, mode='bicubic', align_corners=False)
-            self.mean = nn.Parameter(mean, requires_grad=False)
-            self.std = nn.Parameter(std, requires_grad=False)
 
-        def forward(self, x):
-            x = (x - self.mean) / self.std
-            x = self.upsample(x)
-            x = x * self.std + self.mean
-            return x
-
-    model = BicubicUpsample(scale_factor=4,mean=train_loader.mean,std=train_loader.std).to(device)
+    model = BicubicUpsample(scale_factor = args.sc_factor,mean=train_loader.mean,std=train_loader.std).to(device)
     """avg_psnr, avg_scc, avg_ssim, avg_lpips, lr_images, hr_images, sr_images = metric_s5net(model, train_loader, device, 'Bicubic_Upsample_on_train_set',loss_fn_lpips_gpu,args.save_dir,csv_file, plot_hyper=plot_hyper)
     return lr_images, hr_images, sr_images"""
     return generic_testing(model,train_loader,'Bicubic_Upsample_on_train_set',loss_fn_lpips_gpu,csv_file,args,plot_hyper)
 def bicubic_upsample_test_on_val_set(args,valid_loader,loss_fn_lpips_gpu,csv_file,plot_hyper = True):
     device = args.device
-    class BicubicUpsample(nn.Module):
-        def __init__(self, scale_factor=4,mean=torch.tensor(0.0),std=torch.tensor(1.0)):
-            super(BicubicUpsample, self).__init__()
-            self.upsample = nn.Upsample(scale_factor=scale_factor, mode='bicubic', align_corners=False)
-            self.mean = nn.Parameter(mean, requires_grad=False)
-            self.std = nn.Parameter(std, requires_grad=False)
 
-        def forward(self, x):
-            x = (x - self.mean) / self.std
-            x = self.upsample(x)
-            x = x * self.std + self.mean
-            return x
-
-    model = BicubicUpsample(scale_factor=4,mean=valid_loader.mean,std=valid_loader.std).to(device)
+    model = BicubicUpsample(scale_factor = args.sc_factor,mean=valid_loader.mean,std=valid_loader.std).to(device)
     """avg_psnr, avg_scc, avg_ssim, avg_lpips, lr_images, hr_images, sr_images = metric_s5net(model, valid_loader, device, 'Bicubic_Upsample_on_val_set',loss_fn_lpips_gpu,args.save_dir,csv_file, plot_hyper=plot_hyper)
     return lr_images, hr_images, sr_images"""
     return generic_testing(model,valid_loader,'Bicubic_Upsample_on_val_set',loss_fn_lpips_gpu,csv_file,args,plot_hyper)
@@ -603,15 +602,17 @@ def generic_testing(model,test_loader,network_test_name,loss_fn_lpips_gpu,csv_fi
         avg_psnr, avg_scc, avg_ssim, avg_lpips, lr_images, hr_images, sr_images = metric_s5net(model, test_loader, device, network_test_name,loss_fn_lpips_gpu,args.save_dir,csv_file, plot_hyper=plot_hyper)
         return lr_images, hr_images, sr_images
     elif args.mode == "hr-sr":
+        physics = get_physics(args)
+        bicubmodel = BicubicUpsample(scale_factor = args.sc_factor,mean=test_loader.mean,std=test_loader.std).to(device)
         avg_psnr, avg_sharp = metric_selfsupervised_shr(
             model,
             args,
             test_loader,
-            physics=None,
+            physics=physics,
             network_name=network_test_name,
             csv_filename=csv_file,
             plot_hyper=plot_hyper,
-            bicubic_model=None,
+            bicubic_model=bicubmodel,
             save_dir=args.save_dir
         )
         return avg_psnr, avg_sharp

@@ -1,9 +1,10 @@
+import copy
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 from torch.nn import Module
-
+import matplotlib.pyplot as plt
 
 
 # Import lr_scheduler module and ensure compatibility for LRScheduler attribute
@@ -119,20 +120,25 @@ def padded_downsampling_transform(
 
 
 class PaddedDownsamplingTransform(Module):
-    def __init__(self, antialias, downsampling_rates):
+    def __init__(self, antialias, downsampling_rates, scaling_mc_factor=1):
         super().__init__()
         self.antialias = antialias
         self.downsampling_rates = downsampling_rates
-
+        self.scaling_mc_factor = scaling_mc_factor
     def forward(self, x):
-        downsampling_rate, center = sample_downsampling_parameters(image_count=x.shape[0], device=x.device,dtype=x.dtype, rates=self.downsampling_rates)
+        downsampling_rate, center = sample_downsampling_parameters(image_count=x.shape[0]*self.scaling_mc_factor, device=x.device,dtype=x.dtype, rates=self.downsampling_rates)
+        #print("scaling_mc_factor", self.scaling_mc_factor)
+        #print("x shape before PaddedDownsamplingTransform:", x.shape)
+        if self.scaling_mc_factor > 1:
+            x = x.repeat(self.scaling_mc_factor,1,1,1)
+        #print("x shape in PaddedDownsamplingTransform:", x.shape)
         x = padded_downsampling_transform(
             x,
             downsampling_rate=downsampling_rate,
             center=center,
             antialiased=self.antialias,
-            mode="bicubic", padding_mode="reflection")
-
+                mode="bicubic", padding_mode="reflection")
+        #print("x shape after PaddedDownsamplingTransform:", x.shape)
         return x
 
 
@@ -151,32 +157,65 @@ def normal_downsampling_transform(x, downsampling_rate, mode, antialiased):
 
 
 class NormalDownsamplingTransform(Module):
-    def __init__(self, antialias, downsampling_rates):
+    def __init__(self, antialias, downsampling_rates, scaling_mc_factor=1):
         super().__init__()
         self.antialias = antialias
         self.downsampling_rates = downsampling_rates
+        self.scaling_mc_factor = scaling_mc_factor
 
     def forward(self, x):
-        downsampling_rate = sample_from(self.downsampling_rates, shape=(), dtype=x.dtype, device=x.device )
-        downsampling_rate = downsampling_rate.item()
-        x = normal_downsampling_transform(x,downsampling_rate=downsampling_rate, mode="bicubic", antialiased=self.antialias)
+        downsampling_rate = sample_from(self.downsampling_rates, shape=(self.scaling_mc_factor,), dtype=x.dtype, device=x.device )
+        #downsampling_rate = downsampling_rate.item()
+        x = x.repeat(self.scaling_mc_factor,1,1,1)
+        for i in range(self.scaling_mc_factor - 1):
+            #x = normal_downsampling_transform(x,downsampling_rate=downsampling_rate, mode="bicubic", antialiased=self.antialias)
+            #x[i*x.shape[0]//self.scaling_mc_factor:(i+1)*x.shape[0]//self.scaling_mc_factor,:,:,:] = normal_downsampling_transform(x[i*x.shape[0]//self.scaling_mc_factor:(i+1)*x.shape[0]//self.scaling_mc_factor,:,:,:],downsampling_rate=downsampling_rate[i].item(), mode="bicubic", antialiased=self.antialias)
+            o = normal_downsampling_transform(x[i*x.shape[0]//self.scaling_mc_factor:(i+1)*x.shape[0]//self.scaling_mc_factor,:,:,:],downsampling_rate=downsampling_rate[i].item(), mode="bicubic", antialiased=self.antialias)
+            #pad o to have the same size as x
+            pad_h = x.shape[2] - o.shape[2]
+            pad_w = x.shape[3] - o.shape[3]
+            #select random shift so the immage is not centered if it does a difference for the network
+            pad_h1 = np.random.randint(0, pad_h + 1)
+            pad_w1 = np.random.randint(0, pad_w + 1)
+            #o = F.pad(o, (pad_h//2, pad_h - pad_h//2 , pad_w//2, pad_w - pad_w//2), mode='constant', value=0)
+            o = F.pad(o, (pad_h1, pad_h - pad_h1 , pad_w1, pad_w - pad_w1), mode='constant', value=0)
+            x[i*x.shape[0]//self.scaling_mc_factor:(i+1)*x.shape[0]//self.scaling_mc_factor,:,:,:] = o
         return x
 
 
 class ScalingTransform(Module):
-    def __init__(self, kind, antialias):
+    def __init__(self, kind, antialias,scaling_mc_factor=1):
         super().__init__()
-        downsampling_rates = [0.75, 0.5]
+        #downsampling_rates = [0.75, 0.5]
+        downsampling_rates = [0.75, 0.5, 0.25]
         if kind == "padded":
-            self.transform = PaddedDownsamplingTransform(antialias=antialias, downsampling_rates=downsampling_rates)
+            self.transform = PaddedDownsamplingTransform(antialias=antialias, downsampling_rates=downsampling_rates, scaling_mc_factor=scaling_mc_factor)
         elif kind == "normal":
-            self.transform = NormalDownsamplingTransform(antialias=antialias, downsampling_rates=downsampling_rates)
+            self.transform = NormalDownsamplingTransform(antialias=antialias, downsampling_rates=downsampling_rates, scaling_mc_factor=scaling_mc_factor)
         else:
             raise ValueError(f"Unknown kind: {kind}")
 
     def forward(self, x):
-        return self.transform(x)
+        #print("x shape in ScalingTransform:", x.shape)
+        x = self.transform(x)
+        """#PLOT THE IMAGES
+        first_img = x[0,:,:,:].detach().cpu().numpy()
+        #select chanel 30,50,100
+        first_img = first_img[[30,50,100],:,:]
+        #normalize the image for range 0-1
+        min_val = first_img.min()
+        max_val = first_img.max()
+        first_img = (first_img - min_val) / (max_val - min_val)
+        #print("first_img shape:", first_img.shape)
+        plt.imshow(np.transpose(first_img, (1, 2, 0)))
+        plt.title("First image after ScalingTransform")
+        plt.axis('off')
+        plt.show()"""
+        
 
+
+        #print("x shape after ScalingTransform:", x.shape)
+        return x
 
 class R2RLoss(nn.Module):
     def __init__(self, metric=torch.nn.MSELoss(), eta=0.1, alpha=0.5):
@@ -345,7 +384,7 @@ class SureGaussianLoss(nn.Module):
         super(SureGaussianLoss, self).__init__()
         self.name = "SureGaussian"
         self.sigma2 = args.noise_level ** 2
-        self.tau = tau
+        self.tau = 1e-2 * 1e-7
         self.margin = margin
         self.cropped_div = cropped_div
         self.averaged_cst = averaged_cst
@@ -396,6 +435,7 @@ class SureGaussianLoss(nn.Module):
                 mse = mse.pow(2).mean(axis=(1, 2, 3))
                 div = 2 * self.sigma2 * div
                 loss_sure = mse + div
+            #print("Sure loss in eval mode:", loss_sure, "x_net norm:", torch.norm(x_net))
             return loss_sure,x_net
 
 
@@ -426,7 +466,7 @@ class ProposedLoss(Module):
         super().__init__()
         self.physics = physics
         self.mode = args.mode
-
+        self.ssl_scalingTransform_mc_div_multiple_factor = args.ssl_scalingTransform_mc_div_multiple_factor
         if args.ssl_transform == "Scaling_Transforms":
             ei_transform = ScalingTransform(**blueprint[ScalingTransform.__name__])
         else:
@@ -469,6 +509,7 @@ class ProposedLoss(Module):
             self.compute_x_net = True
 
     def forward(self, x, y, model):
+        ssl_scalingTransform_mc_div_multiple_factor = self.ssl_scalingTransform_mc_div_multiple_factor
         if model.training or not(torch.is_grad_enabled()):
             if self.compute_x_net:
                 x_net = model(y)
@@ -479,12 +520,23 @@ class ProposedLoss(Module):
             
             for loss_fn in self.loss_fns:
                 loss_value = loss_fn(x=x, x_net=x_net, y=y, physics=self.physics, model=model)
-                #print(f"{loss_fn.__class__.__name__}: {loss_value.shape}, requires_grad={loss_value.requires_grad}")
-
-                
+                #print(f"{loss_fn.__class__.__name__}: {loss_value.shape}, requires_grad={loss_value.requires_grad}")                
                 if isinstance(loss_value, torch.Tensor):
                     #print("loss ", loss_fn.__class__.__name__, loss_value.mean().item())
-                    total_loss = total_loss + loss_value#.mean()
+                    if ssl_scalingTransform_mc_div_multiple_factor == 1:
+                        total_loss = total_loss + loss_value#.mean()
+                    else:
+                        if not(loss_fn.__class__.__name__ == "EILoss"):
+                            #print("loss ", loss_fn.__class__.__name__, loss_value.mean().item())
+                            #print("a",loss_value)
+                            total_loss = total_loss + loss_value#.mean()
+                        else:
+                            #the ssl_scalingTransform_mc_div_multiple_factor multiplied the number of samples in the batch, so we need to reshape the loss
+                            b = loss_value.shape[0]
+                            f,b_ = ssl_scalingTransform_mc_div_multiple_factor, b//ssl_scalingTransform_mc_div_multiple_factor
+                            loss_value = loss_value.view(f,b_).mean(axis=0)
+                            #print("b",loss_value)
+                            total_loss = total_loss + loss_value#.mean()
                 else:
 
                     assert False
@@ -494,13 +546,13 @@ class ProposedLoss(Module):
         else:
             x_net = None
             total_loss = 0.0
-            
+            #print(len(self.loss_fns))
             for loss_fn in self.loss_fns:
                 try:
                     loss_value = None
                     r = loss_fn(x=x, x_net=x_net, y=y, physics=self.physics, model=model)
                     # r can be either a tensor (loss_value) or a tuple/list (loss_value, x_net)
-                    if isinstance(r, (tuple, list)):
+                    if isinstance(r, (tuple)):
                         loss_value = r[0]
                         x_net = r[1]
                     else:
@@ -513,17 +565,32 @@ class ProposedLoss(Module):
                     else:
                         #regenerate the error by calling again the loss function
                         r = loss_fn(x=x, x_net=x_net, y=y, physics=self.physics, model=model)
-                        assert False, "This should not happen." 
+                        assert False, "This should not happen."
                     loss_value = loss_fn(x=x, x_net=x_net, y=y, physics=self.physics, model=model)
                 #print(f"{loss_fn.__class__.__name__}: {loss_value.shape}, requires_grad={loss_value.requires_grad}")
                 with torch.no_grad():
                     if isinstance(loss_value, torch.Tensor):
-                        total_loss = total_loss + loss_value#.mean()
+                        if ssl_scalingTransform_mc_div_multiple_factor == 1:
+                            total_loss = total_loss + loss_value#.mean()
+                        else:
+                            if not(loss_fn.__class__.__name__ == "EILoss"):
+                                #print("c",loss_value)
+                                #print("loss ", loss_fn.__class__.__name__, loss_value)
+                                total_loss = total_loss + loss_value#.mean()
+                            else:
+                                #the ssl_scalingTransform_mc_div_multiple_factor multiplied the number of samples in the batch, so we need to reshape the loss
+                                b = loss_value.shape[0]
+                                f,b_ = ssl_scalingTransform_mc_div_multiple_factor, b//ssl_scalingTransform_mc_div_multiple_factor
+                                loss_value = loss_value.view(f,b_).mean(axis=0)
+                                #print("d",loss_value)
+                                #print("loss ", loss_fn.__class__.__name__, loss_value)
+                                total_loss = total_loss + loss_value#.mean()
                     else:
                         assert False
                         total_loss = total_loss + torch.tensor(loss_value, device=y.device, dtype=torch.float32)
 
             #print("total_loss:", total_loss, "requires_grad:", total_loss.requires_grad)
+        #print("final", total_loss)
         return total_loss
 
 
@@ -574,7 +641,11 @@ class Loss(Module):
         #print("AFTER : inside loss function", loss.shape)
         #loss = loss.mean()
         return loss
-    
+
+
+
+
+
 
 
 
@@ -604,6 +675,7 @@ def get_loss(args, physics):
     blueprint[ScalingTransform.__name__] = {
         "kind": args.ssl_scalingTransform__kind,
         "antialias": args.ssl_scalingTransform__antialias,
+        "scaling_mc_factor": args.ssl_scalingTransform_mc_div_multiple_factor,
     }
 
     sure_cropped_div = args.sure_cropped_div
@@ -620,3 +692,22 @@ def get_loss(args, physics):
     )
 
     return loss.to(args.device)
+
+def get_debug_loss(args, physics):
+    #invert ssl and sl for debugging purposes
+    assert args.mode == "lr-hr"
+    #copy args to new object
+    new_args = copy.deepcopy(args)
+    new_args.ssl = not args.ssl
+    return get_loss(new_args, physics)
+def get_debug_loss_similarity(args, physics):
+    assert args.mode == "lr-hr"
+    #copy args to new object
+    new_args = copy.deepcopy(args)
+    new_args.ssl = True
+    l = get_loss(new_args, physics)
+    p = l.loss.loss_fns.pop()  # remove equivariant loss
+    print(f"Debug loss similarity: not using {p.__class__.__name__} loss for debugging.")
+    for loss_fn in l.loss.loss_fns:
+        print(f"Debug loss similarity: using {loss_fn.__class__.__name__} loss for debugging.")
+    return l

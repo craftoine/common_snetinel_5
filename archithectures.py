@@ -231,3 +231,16 @@ def unet_800k_x4(num_spectral_bands,upsample_scale=2, mean=torch.tensor(0.0), st
         mean=mean,
         std=std
     )
+
+class BicubicUpsample(nn.Module):
+    def __init__(self, scale_factor=4,mean=torch.tensor(0.0),std=torch.tensor(1.0)):
+        super(BicubicUpsample, self).__init__()
+        self.upsample = nn.Upsample(scale_factor=scale_factor, mode='bicubic', align_corners=False)
+        self.mean = nn.Parameter(mean, requires_grad=False)
+        self.std = nn.Parameter(std, requires_grad=False)
+
+    def forward(self, x, physics=None):
+        x = (x - self.mean) / self.std
+        x = self.upsample(x)
+        x = x * self.std + self.mean
+        return x

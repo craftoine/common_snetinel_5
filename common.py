@@ -88,8 +88,9 @@ class Arguments:
                 ssl_transform =  "Scaling_Transforms",
                 ssl_stop_gradient = True,
                 ssl_sure_alternative = None,
-                ssl_scalingTransform__kind = "padded",
+                ssl_scalingTransform__kind = "normal",#"padded",
                 ssl_scalingTransform__antialias = False,
+                ssl_scalingTransform_mc_div_multiple_factor = 1,
                 mode = "lr-hr",
                 sc_factor = 4,
                 noise_level = None,
@@ -125,6 +126,7 @@ class Arguments:
         self.ssl_sure_alternative = ssl_sure_alternative
         self.ssl_scalingTransform__kind = ssl_scalingTransform__kind
         self.ssl_scalingTransform__antialias = ssl_scalingTransform__antialias
+        self.ssl_scalingTransform_mc_div_multiple_factor = ssl_scalingTransform_mc_div_multiple_factor
         self.mode = mode
         self.sc_factor = sc_factor
         self.noise_level = noise_level

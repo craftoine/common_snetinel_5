@@ -237,7 +237,8 @@ class PhysicsManager:
             x = self.physics.noise_model(x)
         return x
 
-def get_physics(args, device):
+def get_physics(args):
+    device = args.device
     blueprint = {}
     blueprint[PhysicsManager.__name__] = {
         "task": "sr",
