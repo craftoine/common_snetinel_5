@@ -166,6 +166,8 @@ class NormalDownsamplingTransform(Module):
     def forward(self, x):
         downsampling_rate = sample_from(self.downsampling_rates, shape=(self.scaling_mc_factor,), dtype=x.dtype, device=x.device )
         #downsampling_rate = downsampling_rate.item()
+        if self.scaling_mc_factor == len(self.downsampling_rates):
+            downsampling_rate = [torch.tensor(rate) for rate in self.downsampling_rates]
         x = x.repeat(self.scaling_mc_factor,1,1,1)
         for i in range(self.scaling_mc_factor - 1):
             #x = normal_downsampling_transform(x,downsampling_rate=downsampling_rate, mode="bicubic", antialiased=self.antialias)
@@ -175,8 +177,10 @@ class NormalDownsamplingTransform(Module):
             pad_h = x.shape[2] - o.shape[2]
             pad_w = x.shape[3] - o.shape[3]
             #select random shift so the immage is not centered if it does a difference for the network
-            pad_h1 = np.random.randint(0, pad_h + 1)
-            pad_w1 = np.random.randint(0, pad_w + 1)
+            #pad_h1 = np.random.randint(0, pad_h + 1)
+            #pad_w1 = np.random.randint(0, pad_w + 1)
+            pad_h1 = pad_h // 2
+            pad_w1 = pad_w // 2
             #o = F.pad(o, (pad_h//2, pad_h - pad_h//2 , pad_w//2, pad_w - pad_w//2), mode='constant', value=0)
             o = F.pad(o, (pad_h1, pad_h - pad_h1 , pad_w1, pad_w - pad_w1), mode='constant', value=0)
             x[i*x.shape[0]//self.scaling_mc_factor:(i+1)*x.shape[0]//self.scaling_mc_factor,:,:,:] = o
