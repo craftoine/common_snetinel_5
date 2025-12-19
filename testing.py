@@ -382,25 +382,28 @@ def metric_selfsupervised_shr(
     recon_psnr, sharpness_gain = [], []
     model = model.to(device) 
     with torch.no_grad():
-        for idx, (_, hr) in enumerate(test_loader.loader):  
-            hr = hr.to(device)
-            shr = torch.relu(model(hr))
+        for idx, (lr, hr) in enumerate(test_loader.loader):
+            if args.mode == "lr-hr":
+                hr_ = lr.to(device)
+            else:
+                hr_ = hr.to(device)
+            shr = torch.relu(model(hr_))
             a_shr = physics.A(shr)
 
             # Measurement consistency
-            psnr_val = psnr_gpu(a_shr, hr, device, data_range=1).item()
+            psnr_val = psnr_gpu(a_shr, hr_, device, data_range=1).item()
             recon_psnr.append(psnr_val)
 
             # Sharpness gain
-            sharp_hr = gradient_energy(hr[0])
+            sharp_hr = gradient_energy(hr_[0])
             sharp_shr = gradient_energy(shr[0])
             sharpness_gain.append(sharp_shr / (sharp_hr + 1e-8))
 
             if plot_hyper:
-                hr_np = hr[0].cpu().numpy()
+                hr_np = hr_[0].cpu().numpy()
                 a_shr_np = a_shr[0].cpu().numpy()
                 shr_np = shr[0].cpu().numpy()
-                bicubic_out = bicubic_model(hr.cpu())
+                bicubic_out = bicubic_model(hr_.cpu())
                 bicubic_np = bicubic_out[0].cpu().numpy()
 
                 # --- PCA false color ---
@@ -600,7 +603,20 @@ def generic_testing(model,test_loader,network_test_name,loss_fn_lpips_gpu,csv_fi
     device = args.device
     if args.mode == "lr-hr":
         avg_psnr, avg_scc, avg_ssim, avg_lpips, lr_images, hr_images, sr_images = metric_s5net(model, test_loader, device, network_test_name,loss_fn_lpips_gpu,args.save_dir,csv_file, plot_hyper=plot_hyper)
-        return lr_images, hr_images, sr_images
+        physics = get_physics(args)
+        bicubmodel = BicubicUpsample(scale_factor = args.sc_factor,mean=test_loader.mean,std=test_loader.std).to(device)
+        avg_psnr, avg_sharp = metric_selfsupervised_shr(
+            model,
+            args,
+            test_loader,
+            physics=physics,
+            network_name=network_test_name,
+            csv_filename=csv_file,
+            plot_hyper=plot_hyper,
+            bicubic_model=bicubmodel,
+            save_dir=args.save_dir
+        )
+        return lr_images, hr_images, sr_images, avg_psnr, avg_scc
     elif args.mode == "hr-sr":
         physics = get_physics(args)
         bicubmodel = BicubicUpsample(scale_factor = args.sc_factor,mean=test_loader.mean,std=test_loader.std).to(device)
