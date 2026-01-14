@@ -14,12 +14,13 @@ import torch.nn.functional as F
 from torchmetrics.image import SpatialCorrelationCoefficient as scc_gpu
 from torchmetrics.regression import CosineSimilarity as cs_gpu
 from torchmetrics.image import StructuralSimilarityIndexMeasure as ssim_gpu
-
+from kornia.filters import sobel as sobel_gpu
+from operator_ import get_physics
 def psnr_gpu(sr, hr_img, device, data_range=1):
     if len(sr.shape)>=3:
         #print(sr.shape, hr_img.shape)
-        sr = sr.view(-1, sr.size(-2), sr.size(-1))
-        hr_img = hr_img.view(-1, hr_img.size(-2), hr_img.size(-1))
+        sr = sr.reshape(-1, sr.size(-2), sr.size(-1))
+        hr_img = hr_img.reshape(-1, hr_img.size(-2), hr_img.size(-1))
         #comput the mse on the las 2 coordinates and not the batch one
         mse = torch.mean((sr -hr_img) ** 2, dim=(-2,-1))
         #print(mse.shape)
@@ -77,37 +78,19 @@ def scc(sr, hr):
 
     return scc_value, scc_map
 
-def sobel_gpu(img, mode='reflect', device='cpu'):
-    #img of shape (B, C, H, W)
-    #create 2 3*1 and 1*3 sobel kernels
-    B, C, H, W = img.shape
-    kernel_x = torch.tensor([-1., 0., 1.], dtype=img.dtype, device=device).view(1, 1, 1, 3).expand(1,C,1,3)
-    kernel_y = torch.tensor([1., -2., 1.], dtype=img.dtype, device=device).view(1, 1, 3, 1).expand(1,C,3,1)
-    img_pad_x = F.pad(img, (1, 1, 0, 0), mode=mode)
-    img_x = F.conv2d(img_pad_x, kernel_x, padding=0)
-    img_pad_y = F.pad(img_x, (0, 0, 1, 1), mode=mode)
-    img_y = F.conv2d(img_pad_y, kernel_y, padding=0)
-    return img_y
+def scc_gpu_(sr, hr):
+    if sr.dim() == 3:
+        sr = sr.unsqueeze(0)
+        hr = hr.unsqueeze(0)
 
+    sr_lap = sobel_gpu(sr)
+    hr_lap = sobel_gpu(hr)
 
-class scc_gpu__(nn.Module):
-    def __init__(self, reduction='mean'):
-        super(scc_gpu, self).__init__()
-        self.reduction = reduction
-    def forward(self, sr, hr):
-        #sr and hr of shape (B, C, H, W)
-        #apply sobel-like filter per channel then cosine similarity
-        sr_lap_x = sobel_gpu(sr, device=sr.device)
-        sr_lap_y = sobel_gpu(sr.transpose(2,3), device=sr.device).transpose(2,3)
-        sr_lap = torch.sqrt(sr_lap_x**2 + sr_lap_y**2)
-        hr_lap_x = sobel_gpu(hr, device=hr.device)
-        hr_lap_y = sobel_gpu(hr.transpose(2,3), device=hr.device).transpose(2,3)
-        hr_lap = torch.sqrt(hr_lap_x**2 + hr_lap_y**2)
-        cs = torch.sum(sr_lap * hr_lap, dim=(1,2,3)) / (torch.sqrt(torch.sum(sr_lap**2, dim=(1,2,3))) * torch.sqrt(torch.sum(hr_lap**2, dim=(1,2,3))))
-        if self.reduction == 'mean':
-            return torch.mean(cs)
-        else:
-            return torch.sum(cs)
+    numerator = torch.sum(sr_lap * hr_lap)
+    denominator = torch.sqrt(torch.sum(sr_lap ** 2)) * torch.sqrt(torch.sum(hr_lap ** 2))
+
+    scc_value = numerator / (denominator + 1e-8)  # Add small epsilon to avoid division by zero
+    return scc_value.item()
 
 def calculate_lpips_bandwise(sr, hr, loss_fn_gpu, device):
     lpips_bandwise = []
@@ -231,8 +214,9 @@ def metric_s5net(model, test_loader, device, network_name,loss_fn_lpips_gpu,save
 
                 
                 psnr_value = psnr_gpu(sr, hr_img,device, data_range=1).item()  # [0, 1] range
-                scc_metric = scc_gpu().to(device)
-                scc_value = scc_metric(sr.unsqueeze(0), hr_img.unsqueeze(0)).item()  # [0, 1]
+                """scc_metric = scc_gpu().to(device)
+                scc_value = scc_metric(sr.unsqueeze(0), hr_img.unsqueeze(0)).item()  # [0, 1]"""
+                scc_value = scc_gpu_(sr, hr_img)
 
                 ssim_metric = ssim_gpu(data_range=1.0).to(device)
                 ssim_value = ssim_metric(sr.unsqueeze(0), hr_img.unsqueeze(0)).item()  # [0, 1]
@@ -388,36 +372,46 @@ def metric_selfsupervised_shr(
             else:
                 hr_ = hr.to(device)
             shr = torch.relu(model(hr_))
+            #shr = model(hr_)
             a_shr = physics.A(shr)
+            for i in range(shr.shape[0]):
+                #normalise to [0,1] using max of hr
+                max_hr = hr_[i].max().item()
+                shr[i] = shr[i] / max_hr
+                a_shr[i] = a_shr[i] / max_hr
+                hr_[i] = hr_[i] / max_hr
 
-            # Measurement consistency
-            psnr_val = psnr_gpu(a_shr, hr_, device, data_range=1).item()
-            recon_psnr.append(psnr_val)
+                # Measurement consistency
+                psnr_val = psnr_gpu(a_shr[i], hr_[i], device, data_range=1).item()
+                recon_psnr.append(psnr_val)
 
-            # Sharpness gain
-            sharp_hr = gradient_energy(hr_[0])
-            sharp_shr = gradient_energy(shr[0])
-            sharpness_gain.append(sharp_shr / (sharp_hr + 1e-8))
+                # Sharpness gain
+                """sharp_hr = gradient_energy(hr_[i])
+                sharp_shr = gradient_energy(shr[i])"""
+                #compute with sobel on gpu instead
+                sharp_hr = sobel_gpu(hr_[i].unsqueeze(0)).abs().mean().item()
+                sharp_shr = sobel_gpu(shr[i].unsqueeze(0)).abs().mean().item()
+                sharpness_gain.append(sharp_shr / (sharp_hr + 1e-8))
 
-            if plot_hyper:
-                hr_np = hr_[0].cpu().numpy()
-                a_shr_np = a_shr[0].cpu().numpy()
-                shr_np = shr[0].cpu().numpy()
-                bicubic_out = bicubic_model(hr_.cpu())
-                bicubic_np = bicubic_out[0].cpu().numpy()
+                if plot_hyper:
+                    hr_np = hr_[i].cpu().numpy()
+                    a_shr_np = a_shr[i].cpu().numpy()
+                    shr_np = shr[i].cpu().numpy()
+                    bicubic_out = bicubic_model(hr_.cpu())
+                    bicubic_np = bicubic_out[0].cpu().numpy()
 
-                # --- PCA false color ---
-                hr_reshaped = safe_reshape_for_pca(hr_np)
-                pca = PCA(n_components=3)
-                pca.fit(hr_reshaped)
+                    # --- PCA false color ---
+                    hr_reshaped = safe_reshape_for_pca(hr_np)
+                    pca = PCA(n_components=3)
+                    pca.fit(hr_reshaped)
 
-                hr_pca = pca.transform(hr_reshaped).T.reshape(3, hr_np.shape[1], hr_np.shape[2])
-                a_shr_pca = pca.transform(safe_reshape_for_pca(a_shr_np)).T.reshape(3, a_shr_np.shape[1], a_shr_np.shape[2])
-                shr_pca = pca.transform(safe_reshape_for_pca(shr_np)).T.reshape(3, shr_np.shape[1], shr_np.shape[2])
-                bicubic_pca = pca.transform(safe_reshape_for_pca(bicubic_np)).T.reshape(3, bicubic_np.shape[1], bicubic_np.shape[2])
+                    hr_pca = pca.transform(hr_reshaped).T.reshape(3, hr_np.shape[1], hr_np.shape[2])
+                    a_shr_pca = pca.transform(safe_reshape_for_pca(a_shr_np)).T.reshape(3, a_shr_np.shape[1], a_shr_np.shape[2])
+                    shr_pca = pca.transform(safe_reshape_for_pca(shr_np)).T.reshape(3, shr_np.shape[1], shr_np.shape[2])
+                    bicubic_pca = pca.transform(safe_reshape_for_pca(bicubic_np)).T.reshape(3, bicubic_np.shape[1], bicubic_np.shape[2])
 
-                #plot_hyperspectral_shr_global( hr_pca, a_shr_pca, shr_pca, idx, network_name, bicubic_img=bicubic_pca, save_dir=save_dir, bands=[0, 1, 2] )
-                plot_hyperspectral_shr_global( hr_pca, a_shr_pca, shr_pca, idx, network_name, bicubic_img=bicubic_pca, save_dir=save_dir, bands=[1, 0, 2] )
+                    #plot_hyperspectral_shr_global( hr_pca, a_shr_pca, shr_pca, idx, network_name, bicubic_img=bicubic_pca, save_dir=save_dir, bands=[0, 1, 2] )
+                    plot_hyperspectral_shr_global( hr_pca, a_shr_pca, shr_pca, idx, network_name, bicubic_img=bicubic_pca, save_dir=save_dir, bands=[1, 0, 2] )
 
     
     avg_psnr = np.mean(recon_psnr)

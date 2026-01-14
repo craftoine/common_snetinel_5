@@ -205,6 +205,8 @@ class ScalingTransform(Module):
 
     def forward(self, x):
         #print("x shape in ScalingTransform:", x.shape)
+        #images are positive but not network output so we clip them
+        x = nn.ReLU()(x)
         x = self.transform(x)
         """#PLOT THE IMAGES
         first_img = x[0,:,:,:].detach().cpu().numpy()
@@ -500,7 +502,7 @@ class ProposedLoss(Module):
             loss_fns = [sure_loss]
 
             equivariant_loss = EILoss(
-                metric=ClippedMSE(), # metric=mse(),
+                metric=ClippedMSE(),#metric=mse(),
                 transform=ei_transform,
                 no_grad=args.ssl_stop_gradient,
                 weight=args.ssl_alpha_tradeoff,

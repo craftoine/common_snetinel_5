@@ -240,6 +240,8 @@ class BicubicUpsample(nn.Module):
         self.std = nn.Parameter(std, requires_grad=False)
 
     def forward(self, x, physics=None):
+        #clip x to be compatible with equivariant loss
+        x = nn.ReLU()(x)
         x = (x - self.mean) / self.std
         x = self.upsample(x)
         x = x * self.std + self.mean

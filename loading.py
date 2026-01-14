@@ -13,9 +13,6 @@ def compute_global_metrics(lr_files, hr_files):
         if corresponding_hr_file in hr_files:
             lr_image = sio.loadmat(lr_file)['radiance']
             hr_image = sio.loadmat(corresponding_hr_file)['radiance']
-
-            """all_intensity_values.append(lr_image.flatten())
-            all_intensity_values.append(hr_image.flatten())"""
             #keep the channel separately
             all_intensity_values.append(lr_image.reshape(-1, lr_image.shape[2]))
             all_intensity_values.append(hr_image.reshape(-1, hr_image.shape[2]))
@@ -47,11 +44,11 @@ def extract_patches(image, patch_size, stride=16):
     patch_h, patch_w = patch_size
 
     patches = []
-    print(f'Extracting patches of size {patch_size} from image of size {(img_h, img_w)} with stride {stride}...')
-    print("img_h - patch_h + 1, img_w - patch_w + 1:", img_h - patch_h + 1, img_w - patch_w + 1)
+    #print(f'Extracting patches of size {patch_size} from image of size {(img_h, img_w)} with stride {stride}...')
+    #print("img_h - patch_h + 1, img_w - patch_w + 1:", img_h - patch_h + 1, img_w - patch_w + 1)
     for i in range(0, img_h - patch_h + 1, stride):
         for j in range(0, img_w - patch_w + 1, stride):
-            print(i, j,img_h-patch_h + 1, img_w - patch_w + 1)
+            #print(i, j,img_h-patch_h + 1, img_w - patch_w + 1)
             patch = image[i:i + patch_h, j:j + patch_w, :]  
             patches.append(patch)
     print(f'Extracted {len(patches)} patches of size {patch_size} from image of size {(img_h, img_w)} with stride {stride}.')
@@ -73,9 +70,13 @@ def load_data_with_patches(args,data_path, global_mean=None, global_std=None,plo
         sm = 0
     for lr_img, hr_img in zip(lr_data, hr_data):
         print(lr_img.shape, hr_img.shape)#H,W,C
+
+
+
+
         if plot_images:
             sm = sm + hr_img
-            bands = [30, 50, 70]
+            bands = [30, 100, 300]
             img1 = lr_img[:, :, bands]
             img1_vmin, img1_vmax = img1.min(), img1.max()
             img1 = (img1 - img1_vmin) / (img1_vmax - img1_vmin) if img1_vmax != img1_vmin else img1
@@ -169,9 +170,13 @@ def load_data_with_patches(args,data_path, global_mean=None, global_std=None,plo
 
 
 def load_normalise_data(data_dir, BAND, global_mean=None, global_std=None):
-    lr_files = sorted([os.path.join(data_dir, f) for f in os.listdir(data_dir) if f.endswith('CE_newPipeline_hyper_LR4.mat') and BAND in f ])
+    """lr_files = sorted([os.path.join(data_dir, f) for f in os.listdir(data_dir) if f.endswith('CE_newPipeline_hyper_LR4.mat') and BAND in f ])
     hr_files = sorted([os.path.join(data_dir, f) for f in os.listdir(data_dir) if f.endswith('CE_newPipeline_hyper.mat') and BAND in f])
-
+    """
+    lr_files = sorted([os.path.join(data_dir, f) for f in os.listdir(data_dir) if f.endswith('_newPipeline_hyper_LR4.mat') and '_region_' in f and BAND in f ])
+   
+    hr_files = sorted([os.path.join(data_dir, f) for f in os.listdir(data_dir) if f.endswith('_newPipeline_hyper.mat') and '_region_' in f and BAND in f ])
+    
     if global_mean is None or global_std is None:
         all_intensity_values, global_min, global_max, global_mean, global_median, global_std = compute_global_metrics(lr_files, hr_files)
         """
@@ -196,15 +201,6 @@ def load_normalise_data(data_dir, BAND, global_mean=None, global_std=None):
         if corresponding_hr_file in hr_files:
             lr_image = sio.loadmat(lr_file)['radiance']
             hr_image = sio.loadmat(corresponding_hr_file)['radiance']
-
-            if len(lr_image.shape) == 2:
-                lr_image = lr_image[np.newaxis, :, :]
-            if len(hr_image.shape) == 2:
-                hr_image = hr_image[:, :, np.newaxis]
-
-            """lr_image, lr_min, lr_max, lr_diff, lr_norm_min, lr_norm_max = convert_normalise_meanSTD(lr_image, global_mean, global_std)
-            hr_image, hr_min, hr_max, hr_diff, hr_norm_min, hr_norm_max = convert_normalise_meanSTD(hr_image, global_mean, global_std)"""
-
             lr_data.append(lr_image)
             hr_data.append(hr_image)
 
