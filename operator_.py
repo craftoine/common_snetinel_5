@@ -201,11 +201,33 @@ class Downsampling(LinearPhysics):
         x = F.conv2d(upsampled, psf, padding=padding_size, groups=C)
         return x
 
+
+#custom noise model (to handle corelated or uncorelated noise if needed in future
+class CustomNoiseModel():
+    def __init__(self, sigma,mode,physics):
+        self.noise_model = GaussianNoise(sigma=sigma)
+        self.mode = mode
+        self.physics = physics
+        self.sigma = sigma
+    def __call__(self, x):
+        if self.sigma == 0.:
+            return x
+        if self.mode == "lr-hr":
+            #corelated noise
+            return x + self.physics.A(self.noise_model(torch.zeros_like(self.physics.A_adjoint(torch.zeros_like(x)))))
+            #here A keeep the shape same as x
+            #return x + self.physics.A(self.noise_model(torch.zeros_like(x)))
+        else:
+            #uncorelated noise
+            return self.noise_model(x)
+        
+
 class PhysicsManager:
     def __init__(
         self,
         blueprint,
         task,
+        mode,
         device,
         noise_level,
     ):
@@ -214,7 +236,8 @@ class PhysicsManager:
         else:
             raise ValueError(f"Unknown task: {task}")
 
-        physics.noise_model = GaussianNoise(sigma=noise_level)
+        #physics.noise_model = GaussianNoise(sigma=noise_level)
+        physics.noise_model = CustomNoiseModel(sigma=noise_level, mode=mode, physics=physics)
         # NOTE: These are meant to go.
         setattr(self, "task", task)
         setattr(physics, "task", task)
@@ -242,6 +265,7 @@ def get_physics(args):
     blueprint = {}
     blueprint[PhysicsManager.__name__] = {
         "task": "sr",
+        "mode": args.mode,
         "noise_level": args.noise_level,
     }
 

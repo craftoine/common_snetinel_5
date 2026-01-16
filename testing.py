@@ -365,6 +365,7 @@ def metric_selfsupervised_shr(
     model.eval()
     recon_psnr, sharpness_gain = [], []
     model = model.to(device) 
+    bicubic_model = bicubic_model.to(device)
     with torch.no_grad():
         for idx, (lr, hr) in enumerate(test_loader.loader):
             if args.mode == "lr-hr":
@@ -398,7 +399,7 @@ def metric_selfsupervised_shr(
                     a_shr_np = a_shr[i].cpu().numpy()
                     shr_np = shr[i].cpu().numpy()
                     bicubic_out = bicubic_model(hr_.cpu())
-                    bicubic_np = bicubic_out[0].cpu().numpy()
+                    bicubic_np = bicubic_out[i].cpu().numpy()
 
                     # --- PCA false color ---
                     hr_reshaped = safe_reshape_for_pca(hr_np)
