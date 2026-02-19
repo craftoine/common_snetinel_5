@@ -1,3 +1,17 @@
+"""
+Copyright (c) 
+All rights reserved. This work should only be used for nonprofit purposes.
+
+@author:
+    Antoine Crosnier
+    Hyam Omar-Abbass-Ali (hyam.omar-abbass-ali@univ-orleans.fr)
+    
+"""
+
+"""
+ Description:
+    This file contains the training loop of the model
+"""
 from archithectures import S5_DSCR_S, S5_DSCR
 from torchsummary import summary
 import torch

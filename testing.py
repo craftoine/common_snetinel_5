@@ -1,3 +1,19 @@
+"""
+Copyright (c) 
+All rights reserved. This work should only be used for nonprofit purposes.
+
+@author:
+    Antoine Crosnier
+    Hyam Omar-Abbass-Ali (hyam.omar-abbass-ali@univ-orleans.fr)
+    
+"""
+
+"""
+ Description:
+    This file contains the definition of the testing functions that will be used to evaluate the performance of the model.
+"""
+
+
 from multiprocessing import reduction
 import torch
 import numpy as np

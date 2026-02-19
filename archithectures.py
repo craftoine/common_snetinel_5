@@ -1,3 +1,20 @@
+"""
+Copyright (c) 
+All rights reserved. This work should only be used for nonprofit purposes.
+
+@author:
+    Antoine Crosnier
+    Hyam Omar-Abbass-Ali (hyam.omar-abbass-ali@univ-orleans.fr)
+    
+"""
+
+"""
+ Description:
+    This file contains the sutdy architectures.
+"""
+
+
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F

@@ -1,3 +1,19 @@
+"""
+Copyright (c) 
+All rights reserved. This work should only be used for nonprofit purposes.
+
+@author:
+    Antoine Crosnier
+    Hyam Omar-Abbass-Ali (hyam.omar-abbass-ali@univ-orleans.fr)
+    
+"""
+
+"""
+ Description:
+    This file contains the definition of the operator that will be used in the training and testing of the model.
+    Some of the code bellow is adapted from DeepInv library
+"""
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F

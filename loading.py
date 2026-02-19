@@ -1,3 +1,21 @@
+"""
+Copyright (c) 
+All rights reserved. This work should only be used for nonprofit purposes.
+
+@author:
+    Antoine Crosnier
+    Hyam Omar-Abbass-Ali (hyam.omar-abbass-ali@univ-orleans.fr)
+    
+"""
+
+"""
+ Description:
+    This file contains the functions related to loading the data, and extracting patches from the images.
+"""
+
+
+
+
 import scipy.io as sio
 import numpy as np
 import torch

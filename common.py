@@ -1,3 +1,19 @@
+"""
+Copyright (c) 
+All rights reserved. This work should only be used for nonprofit purposes.
+
+@author:
+    Antoine Crosnier
+    Hyam Omar-Abbass-Ali (hyam.omar-abbass-ali@univ-orleans.fr)
+    
+"""
+
+"""
+ Description:
+    This file contains some utility definitions and functions, and also group all the imports of the different modules of the project.
+"""
+
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -88,7 +104,7 @@ class Arguments:
                 ssl_transform =  "Scaling_Transforms",
                 ssl_stop_gradient = True,
                 ssl_sure_alternative = None,
-                ssl_scalingTransform__kind = "normal",#"padded",
+                ssl_scalingTransform__kind = "no",#"mirror","no"
                 ssl_scalingTransform__antialias = False,
                 ssl_scalingTransform_mc_div_multiple_factor = 1,
                 mode = "lr-hr",

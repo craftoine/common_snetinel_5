@@ -1,3 +1,20 @@
+"""
+Copyright (c) 
+All rights reserved. This work should only be used for nonprofit purposes.
+
+@author:
+    Antoine Crosnier
+    Hyam Omar-Abbass-Ali (hyam.omar-abbass-ali@univ-orleans.fr)
+    
+"""
+
+"""
+ Description:
+    This file contains the definitions of the different loss functions used for training and evaluation.
+    Some of the code bellow is adapted from DeepInv library
+"""
+
+
 import copy
 import torch
 import torch.nn as nn
@@ -196,9 +213,9 @@ class ScalingTransform(Module):
         super().__init__()
         #downsampling_rates = [0.75, 0.5]
         downsampling_rates = [0.75, 0.5, 0.25]
-        if kind == "padded":
+        if kind == "mirror":
             self.transform = PaddedDownsamplingTransform(antialias=antialias, downsampling_rates=downsampling_rates, scaling_mc_factor=scaling_mc_factor)
-        elif kind == "normal":
+        elif kind == "no":
             self.transform = NormalDownsamplingTransform(antialias=antialias, downsampling_rates=downsampling_rates, scaling_mc_factor=scaling_mc_factor)
         else:
             raise ValueError(f"Unknown kind: {kind}")
